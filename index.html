@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070b13">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<title>Stellar Dominion — Proto</title>
+
+<!-- Styles are split by feature. Cascade order matters: keep this sequence. -->
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/topbar.css">
+<link rel="stylesheet" href="css/views.css">
+<link rel="stylesheet" href="css/galaxy.css">
+<link rel="stylesheet" href="css/nav.css">
+<link rel="stylesheet" href="css/planet.css">
+<link rel="stylesheet" href="css/sheets.css">
+<link rel="stylesheet" href="css/event.css">
+<link rel="stylesheet" href="css/screens.css">
+<link rel="stylesheet" href="css/utilities.css">
+</head>
+<body>
+
+<!-- Markup only: styles live in css/, behaviour in js/. See README.md. -->
+<div id="app">
+  <!-- STICKY TOP BAR -->
+  <header id="topbar">
+    <div class="topline">
+      <span class="brand"><span class="brand-star">✦</span>STELLAR DOMINION</span>
+      <span class="topline-status">
+        <button class="event-chip hidden" id="event-chip" type="button" aria-label="Open the encounter deck" title="Encounter deck">
+          <span class="event-chip-emoji" aria-hidden="true">📡</span>
+          <span id="event-chip-text">EVENTS</span>
+        </button>
+        <button class="save-chip hidden" id="save-chip" type="button" aria-label="Save or load this run" title="Save / load">
+          <span class="save-chip-emoji" aria-hidden="true">💾</span>
+          <span class="save-chip-label">SAVE</span>
+        </button>
+        <span id="turn-label">TURN 1</span>
+      </span>
+    </div>
+    <div class="resources" aria-label="Empire resources">
+      <button class="res-chip" data-resource="energy" aria-label="Energy details">
+        <span class="res-head"><span class="res-icon">⚡</span><span class="res-name">ENERGY</span></span>
+        <span class="res-line"><span class="res-value" id="val-energy">10</span><span class="res-delta" id="delta-energy">+1</span></span>
+      </button>
+      <button class="res-chip" data-resource="minerals" aria-label="Minerals details">
+        <span class="res-head"><span class="res-icon">⛏</span><span class="res-name">MINERALS</span></span>
+        <span class="res-line"><span class="res-value" id="val-minerals">10</span><span class="res-delta" id="delta-minerals">+2</span></span>
+      </button>
+      <button class="res-chip" data-resource="research" aria-label="Research details">
+        <span class="res-head"><span class="res-icon">🔬</span><span class="res-name">RESEARCH</span></span>
+        <span class="res-line"><span class="res-value" id="val-research">0</span><span class="res-delta" id="delta-research">+0</span></span>
+      </button>
+      <button class="res-chip" data-resource="influence" aria-label="Influence details">
+        <span class="res-head"><span class="res-icon">🏛</span><span class="res-name">INFLUENCE</span></span>
+        <span class="res-line"><span class="res-value" id="val-influence">5</span><span class="res-delta" id="delta-influence">+1</span></span>
+      </button>
+    </div>
+    <div class="ledger-strip" aria-label="Economy scope">
+      <span class="ledger-scope" id="ledger-sector">⚡⛏ SECTOR LEDGER · SOLARA CORE</span>
+      <span class="ledger-global" id="ledger-global">🔬🏛 EMPIRE-WIDE</span>
+    </div>
+    <div class="statusline">
+      <button class="stability-btn" data-resource="stability" id="stability-btn" aria-label="Stability details">
+        <span class="stability-head">
+          <span class="stability-name">STABILITY</span>
+          <span class="stability-mode" id="stability-mode">UNREST −25%</span>
+          <span class="stability-value"><span id="stability-value">70</span>/100</span>
+        </span>
+        <span class="stability-track"><span class="stability-fill" id="stability-fill"></span></span>
+      </button>
+      <button class="threat-chip hidden" id="threat-chip" type="button" aria-live="polite">
+        <span class="threat-emoji">⚔</span>
+        <span id="threat-text">HOSTILE</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN VIEWS -->
+  <main id="main">
+    <section class="view" id="view-map">
+      <!-- GALAXY GRAPH -->
+      <div class="galaxy-panel" id="galaxy-panel">
+        <div class="view-top">
+          <div class="view-title">
+            <span class="kicker">GALACTIC CARTOGRAPHY</span>
+            <h2>Galaxy</h2>
+          </div>
+          <div class="view-badge"><b id="colonies-count">1</b> <span id="colonies-label">COLONY</span> · <b id="galaxy-sector-count">37</b> SECTORS</div>
+        </div>
+        <div class="galaxy-topline">
+          <span class="galaxy-ledger" id="galaxy-ledger">SOLARA CORE · ⚡ 10 ⛏ 10</span>
+          <div class="galaxy-view-wrap" id="galaxy-view-wrap">
+            <button class="sector-view-btn" id="galaxy-view-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="galaxy-layer-menu" title="Galaxy layers">
+              <span class="sector-view-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>VIEW</span>
+            </button>
+            <div class="map-layer-popup align-right hidden" id="galaxy-layer-menu" role="dialog" aria-modal="false" aria-labelledby="galaxy-layer-title" aria-hidden="true">
+              <div class="map-layer-head">
+                <span class="kicker" id="galaxy-layer-title">GALAXY LAYERS</span>
+                <span class="map-layer-scope" id="galaxy-layer-scope">37 SECTORS</span>
+              </div>
+              <button class="map-layer-item" id="galaxy-layer-trade" type="button" role="switch" aria-checked="false" data-galaxy-layer="trade">
+                <span class="map-layer-icon" aria-hidden="true"></span>
+                <span class="map-layer-copy">
+                  <span class="map-layer-name">Trade view</span>
+                  <span class="map-layer-sub" id="galaxy-layer-trade-sub">No trade routes yet.</span>
+                </span>
+                <span class="map-layer-switch" aria-hidden="true"><i></i></span>
+              </button>
+              <p class="map-layer-foot">Route lines connect each <b>trading center</b> to the sector it supplies. A center needs an <b>operational gate</b> in its own sector.</p>
+            </div>
+          </div>
+        </div>
+        <div class="galaxy-legend" aria-label="Galaxy legend">
+          <span class="legend-item"><span class="legend-dot home"></span>HOME</span>
+          <span class="legend-item"><span class="legend-dot current"></span>CURRENT</span>
+          <span class="legend-item"><span class="legend-dot charted"></span>VISITED</span>
+          <span class="legend-item"><span class="legend-dot power"></span>POWER</span>
+          <span class="legend-item"><span class="legend-dot rival"></span>RIVAL</span>
+          <span class="legend-item"><span class="legend-dot uncharted"></span>UNCHARTED</span>
+          <span class="legend-item"><span class="legend-line"></span>JUMP LANE</span>
+          <span class="legend-item hidden" id="galaxy-trade-legend"><span class="legend-line trade"></span>TRADE ROUTE</span>
+        </div>
+        <div class="galaxy-stage" id="galaxy-stage" role="region" tabindex="0" aria-label="Scrollable galaxy map. Scroll or drag in both directions.">
+          <div class="galaxy-space" id="galaxy-space">
+            <svg id="galaxy-graph" viewBox="0 0 700 720" role="group" aria-label="Galaxy map of circular sector rings around the home core"></svg>
+          </div>
+        </div>
+        <div class="galaxy-trade-panel hidden" id="galaxy-trade-panel" aria-live="polite"></div>
+        <p class="galaxy-seed" id="galaxy-seed">SEED 20261112 · 37 SECTORS · 4 RINGS</p>
+      </div>
+
+      <!-- SECTOR HEX GRID -->
+      <div class="sector-panel hidden" id="sector-panel">
+        <div class="sector-topline">
+          <div class="sector-topline-actions">
+            <button class="sector-back" id="sector-back" aria-label="Back to galaxy">← GALAXY</button>
+            <div class="sector-view-wrap" id="sector-view-wrap">
+              <button class="sector-view-btn" id="sector-view-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="sector-layer-menu" title="Map layers">
+                <span class="sector-view-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>VIEW</span>
+              </button>
+              <div class="map-layer-popup hidden" id="sector-layer-menu" role="dialog" aria-modal="false" aria-labelledby="map-layer-title" aria-hidden="true">
+                <div class="map-layer-head">
+                  <span class="kicker" id="map-layer-title">MAP LAYERS</span>
+                  <span class="map-layer-scope" id="map-layer-scope">SOLARA CORE</span>
+                </div>
+                <button class="map-layer-item" id="map-layer-charted" type="button" role="switch" aria-checked="false" data-map-layer="charted">
+                  <span class="map-layer-icon" aria-hidden="true"></span>
+                  <span class="map-layer-copy">
+                    <span class="map-layer-name">Charted space</span>
+                    <span class="map-layer-sub" id="map-layer-charted-sub">0 / 24 hexes charted.</span>
+                  </span>
+                  <span class="map-layer-switch" aria-hidden="true"><i></i></span>
+                </button>
+                <button class="map-layer-item" id="map-layer-landing" type="button" role="switch" aria-checked="true" data-map-layer="landing">
+                  <span class="map-layer-icon" aria-hidden="true"></span>
+                  <span class="map-layer-copy">
+                    <span class="map-layer-name">Landing hexes</span>
+                    <span class="map-layer-sub" id="map-layer-landing-sub">0 landing hexes · one per lane.</span>
+                  </span>
+                  <span class="map-layer-switch" aria-hidden="true"><i></i></span>
+                </button>
+                <button class="map-layer-item" id="map-layer-patrol" type="button" role="switch" aria-checked="true" data-map-layer="patrol">
+                  <span class="map-layer-icon" aria-hidden="true"></span>
+                  <span class="map-layer-copy">
+                    <span class="map-layer-name">Patrol coverage</span>
+                    <span class="map-layer-sub" id="map-layer-patrol-sub">No patrol cover in this sector.</span>
+                  </span>
+                  <span class="map-layer-switch" aria-hidden="true"><i></i></span>
+                </button>
+                <p class="map-layer-foot">Charted space tints explored hexes. Landing hexes name the sector whose ships arrive there. Patrol coverage merges every corvette and stronghold into <b>one zone</b>. Red raid warnings stay visible on their entry hex and count down to contact.</p>
+              </div>
+            </div>
+          </div>
+          <span class="sector-breadcrumb" id="sector-breadcrumb">CORE · SECTOR 01 / 37</span>
+        </div>
+        <div class="view-top">
+          <div class="view-title">
+            <span class="kicker" id="sector-kicker">CORE · HOME SECTOR</span>
+            <h2 id="sector-title">Solara Core</h2>
+          </div>
+          <div class="view-badge sector-badge" id="sector-badge" role="group" title="Sector intelligence">
+            <span class="sector-badge-line"><span class="sector-badge-label">INTEL</span> <b id="sector-intel">1</b></span>
+            <span class="sector-badge-line"><b id="sector-charted">1</b> / 24 CHARTED</span>
+          </div>
+        </div>
+        <div class="move-banner hidden" id="move-banner" aria-live="polite">
+          <div class="move-banner-main">
+            <span class="kicker">FLEET MOVEMENT</span>
+            <strong id="move-banner-text">Tap any destination hex.</strong>
+            <span class="move-banner-sub" id="move-banner-sub"></span>
+          </div>
+          <div class="move-banner-actions">
+            <button class="move-confirm hidden" id="move-confirm">CONFIRM</button>
+            <button class="move-cancel" id="move-cancel">CANCEL</button>
+          </div>
+        </div>
+        <div class="map-stage">
+          <svg id="sector-map" viewBox="0 0 392 279" role="group" aria-label="Hex map of the current sector"></svg>
+        </div>
+        <div class="map-legend" aria-label="Sector legend">
+          <span class="legend-item"><span class="legend-dot colony"></span>COLONY</span>
+          <span class="legend-item"><span class="legend-dot signal"></span>CHARTED</span>
+          <span class="legend-item hidden" id="charted-view-legend"><span class="legend-dot charted-view"></span>CHARTED VIEW</span>
+          <span class="legend-item hidden" id="landing-legend"><span class="legend-dot landing"></span>LANDING</span>
+          <span class="legend-item"><span class="legend-dot fleet"></span>FLEET</span>
+          <span class="legend-item"><span class="legend-dot structure"></span>STRUCTURE</span>
+          <span class="legend-item"><span class="legend-dot site"></span>SITE</span>
+          <span class="legend-item"><span class="legend-dot enemy"></span>ENEMY</span>
+          <span class="legend-item"><span class="legend-dot raid-warning"></span>RAID ETA</span>
+          <span class="legend-item"><span class="legend-dot battle"></span>BATTLE</span>
+          <span class="legend-item" id="patrol-legend"><span class="legend-dot patrol"></span>PATROL</span>
+          <span class="legend-item"><span class="legend-dot fog"></span>FOG</span>
+          <span class="legend-item"><span class="legend-dot attention"></span>ATTENTION</span>
+          <span class="legend-item"><span class="legend-line route"></span>ROUTE</span>
+        </div>
+        <div class="sector-stats" aria-label="Sector summary">
+          <div class="sector-stat"><span>CHARTED</span><b><span id="sector-stat-charted">1</span><small>/ 24</small></b></div>
+          <div class="sector-stat"><span>COLONIES</span><b id="sector-stat-colonies">1</b></div>
+          <div class="sector-stat"><span>SITES</span><b id="sector-stat-sites">0</b></div>
+          <div class="sector-stat"><span>FLEETS</span><b id="sector-stat-fleets">3</b></div>
+          <div class="sector-stat"><span>POWER</span><b id="sector-stat-power">0</b></div>
+          <div class="sector-stat" title="Hostile power in this sector"><span>THREAT</span><b id="sector-stat-threat">0</b></div>
+          <div class="sector-stat" title="Energy stock and net gain in this sector"><span>ENERGY</span><b><span id="sector-stat-energy">0</span><small id="sector-stat-energy-net">+0</small></b></div>
+          <div class="sector-stat" title="Mineral stock and net gain in this sector"><span>MINERALS</span><b><span id="sector-stat-minerals">0</span><small id="sector-stat-minerals-net">+0</small></b></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view hidden" id="view-tech">
+      <div class="view-top">
+        <div class="view-title">
+          <span class="kicker">RESEARCH DIRECTORATE</span>
+          <h2>Technologies</h2>
+        </div>
+        <div class="view-badge">MAX 1 ACTIVE</div>
+      </div>
+      <div class="research-banner" id="research-banner"></div>
+      <div class="tech-list" id="tech-list"></div>
+      <p class="tech-hint">Research is a stockpile. Starting a project spends accumulated points and every future point flows into it. An active project also draws energy upkeep each turn. A completed tech never upgrades an existing building or ship by itself: refit them with the upgrade button on the colony slot or in the fleet DRYDOCK.</p>
+    </section>
+
+    <section class="view hidden" id="view-empire">
+      <div class="view-top">
+        <div class="view-title">
+          <span class="kicker">IMPERIAL LEDGER</span>
+          <h2>Empire</h2>
+        </div>
+        <div class="view-badge" id="empire-colony-badge">1 COLONY</div>
+      </div>
+      <div class="empire-totals" id="empire-totals"></div>
+      <div class="empire-meta-row" id="empire-meta"></div>
+      <div class="empire-military" id="empire-military"></div>
+      <div class="empire-section-label">SECTOR ECONOMY · ⚡⛏ LOCAL · 🔬🏛 EMPIRE-WIDE</div>
+      <div class="sector-ledger-list" id="empire-sector-ledger"></div>
+      <div class="empire-section-label">RIVAL POWERS</div>
+      <div class="empire-rival-list" id="empire-rival-list"></div>
+      <div class="empire-section-label">MILITARY LOG</div>
+      <div class="military-log" id="empire-military-log"></div>
+      <div class="empire-section-label">COLONIZED WORLDS</div>
+      <div class="empire-list" id="empire-list"></div>
+    </section>
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav id="bottombar" aria-label="Main navigation">
+    <button class="nav-tab active" data-tab="map" aria-label="Galaxy">
+      <span class="nav-icon">◈</span><span class="nav-label">GALAXY</span>
+    </button>
+    <button class="nav-tab" data-tab="tech" aria-label="Tech">
+      <span class="nav-icon">⌬</span><span class="nav-label">TECH</span>
+    </button>
+    <button class="nav-tab" data-tab="empire" aria-label="Empire">
+      <span class="nav-icon">♜</span><span class="nav-label">EMPIRE</span>
+    </button>
+    <button id="end-turn" class="nav-tab" aria-label="End turn">
+      <span class="nav-icon">▸</span><span class="nav-label" id="end-turn-label">END TURN</span>
+    </button>
+  </nav>
+</div>
+
+<!-- HEX / PLANET SCREEN -->
+<section id="planet-screen" class="fullscreen hidden" aria-label="Hex details">
+  <header class="planet-header">
+    <button class="back-btn" id="planet-back" aria-label="Back to map">←</button>
+    <div class="planet-header-main">
+      <span class="kicker" id="planet-kicker">COLONY</span>
+      <h1 id="planet-header-name">Solara</h1>
+    </div>
+    <button class="details-btn hidden" id="planet-details">DETAILS</button>
+  </header>
+  <div class="sector-tabs" id="sector-tabs" role="tablist" aria-label="Hex details">
+    <button class="sector-tab active" data-sector-tab="world" role="tab" aria-selected="true">WORLD</button>
+    <button class="sector-tab" data-sector-tab="fleet" role="tab" aria-selected="false">FLEET <span class="sector-tab-count" id="fleet-tab-count">3</span></button>
+  </div>
+  <div class="planet-scroll" id="planet-scroll">
+    <div id="planet-content"></div>
+  </div>
+</section>
+
+<!-- BOTTOM SHEET -->
+<div id="sheet-layer" class="hidden" aria-hidden="true">
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <section id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-grab" id="sheet-grab" aria-label="Swipe down to close"><span></span></div>
+    <header class="sheet-head">
+      <div class="sheet-head-main">
+        <span class="kicker" id="sheet-kicker">DETAILS</span>
+        <h2 id="sheet-title">Energy</h2>
+      </div>
+      <button class="sheet-close" id="sheet-close" aria-label="Close">×</button>
+    </header>
+    <div class="sheet-body" id="sheet-body"></div>
+  </section>
+</div>
+
+<!-- EVENT OVERLAY -->
+<section id="event-layer" class="hidden" aria-label="Event encounter">
+  <div class="event-topline">
+    <span>ENCOUNTER PROTOCOL</span>
+    <span class="event-turn" id="event-turn">TURN 1</span>
+  </div>
+  <div class="event-stage">
+    <article class="event-card" id="event-card">
+      <div class="card-rule"></div>
+      <div class="event-emoji" id="event-emoji">🛸</div>
+      <div class="event-meta">
+        <span class="event-category" id="event-category">DISCOVERY</span>
+        <span class="event-kicker" id="event-kicker">ANOMALY</span>
+      </div>
+      <h2 id="event-title">Event</h2>
+      <p class="event-copy" id="event-copy"></p>
+      <div class="swipe-choices" id="swipe-choices"></div>
+      <div class="swipe-instruction hidden" id="swipe-instruction">◀ SWIPE TO DECIDE ▶</div>
+    </article>
+    <div class="swipe-preview left" id="preview-left"></div>
+    <div class="swipe-preview right" id="preview-right"></div>
+  </div>
+  <div class="event-buttons hidden" id="event-buttons"></div>
+  <div class="event-instruction" id="event-instruction">◀ swipe left for A · swipe right for B ▶</div>
+</section>
+
+<!-- START SCREEN -->
+<section id="start-screen" aria-label="Start game">
+  <div class="start-inner">
+    <div class="start-mark">✦</div>
+    <p class="start-kicker">FIELD PROTOTYPE / CORE LOOP</p>
+    <h1>STELLAR<br><span>DOMINION</span></h1>
+    <p class="start-copy">A turn-based test of exploration, expansion and survival. Command a tiny fleet, chart the fog, patrol your lanes and outlast the rival powers.</p>
+    <div class="save-resume" id="save-resume">
+      <div class="save-resume-head">
+        <span class="save-resume-label">SAVED RUN</span>
+        <span class="save-resume-meta" id="save-resume-meta">NO SAVE IN THIS BROWSER</span>
+      </div>
+      <button class="save-resume-btn hidden" id="continue-save" type="button">
+        <span class="save-resume-icon" aria-hidden="true">💾</span>
+        <span class="save-resume-copy">
+          <span class="save-resume-title">CONTINUE</span>
+          <span class="save-resume-sub" id="save-resume-sub"></span>
+        </span>
+        <span class="save-resume-chevron" aria-hidden="true">›</span>
+      </button>
+      <button class="save-file-btn" id="load-save-file-start" type="button">LOAD SAVE FILE…</button>
+    </div>
+    <div class="ethics-label"><span>CHOOSE ONE ETHIC</span><span>ONE TAP</span></div>
+    <div class="ethics-list" id="ethics-list"></div>
+    <div class="seed-row">
+      <label class="seed-label" for="seed-input">GALAXY SEED</label>
+      <input class="seed-input" id="seed-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="20261112" aria-label="Galaxy seed">
+      <button class="seed-reroll" id="seed-reroll" type="button" aria-label="Randomize galaxy seed">RANDOM</button>
+    </div>
+    <p class="start-footer">LOCAL SAVES · NO SOUND · SINGLE-PLAYER PROTOTYPE</p>
+  </div>
+</section>
+
+<!-- END SCREEN -->
+<section id="end-screen" class="hidden" aria-label="Game over">
+  <div class="end-content">
+    <div class="end-glyph" id="end-glyph">🌌</div>
+    <p class="end-kicker" id="end-kicker">EXPEDITION COMPLETE</p>
+    <h1 id="end-title">ASCENDED</h1>
+    <p class="end-copy" id="end-copy"></p>
+    <div class="end-stats">
+      <div class="end-stat"><span>TURNS PLAYED</span><b id="end-turns">1</b></div>
+      <div class="end-stat"><span>COLONIES</span><b id="end-colonies">1</b></div>
+      <div class="end-stat"><span>TECHS COMPLETE</span><b id="end-techs">0</b></div>
+      <div class="end-stat"><span>FINAL STABILITY</span><b><span id="end-stability">70</span><small>/100</small></b></div>
+      <div class="end-stat"><span>BATTLES</span><b id="end-battles">0</b></div>
+      <div class="end-stat"><span>HOSTILES DESTROYED</span><b id="end-kills">0</b></div>
+    </div>
+    <button class="primary-btn" id="play-again">PLAY AGAIN</button>
+  </div>
+</section>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="save-file-input" accept=".json,application/json" hidden>
+
+<!-- Classic scripts share one global scope and run in this order.
+     data -> core (rng, galaxy, state, rules, economy) -> ui -> game -> main. -->
+<script src="js/data/config.js"></script>
+<script src="js/data/ethics.js"></script>
+<script src="js/data/buildings.js"></script>
+<script src="js/data/structures.js"></script>
+<script src="js/data/ships.js"></script>
+<script src="js/data/empires.js"></script>
+<script src="js/data/techs.js"></script>
+<script src="js/data/events.js"></script>
+<script src="js/data/anomalies.js"></script>
+<script src="js/data/resources.js"></script>
+<script src="js/data/systems.js"></script>
+<script src="js/core/rng.js"></script>
+<script src="js/core/galaxy.js"></script>
+<script src="js/core/state.js"></script>
+<script src="js/core/helpers.js"></script>
+<script src="js/core/colony.js"></script>
+<script src="js/core/hex-grid.js"></script>
+<script src="js/core/empires.js"></script>
+<script src="js/core/combat.js"></script>
+<script src="js/core/rival-ai.js"></script>
+<script src="js/core/effects.js"></script>
+<script src="js/core/survey.js"></script>
+<script src="js/core/event-engine.js"></script>
+<script src="js/core/trade.js"></script>
+<script src="js/core/economy.js"></script>
+<script src="js/core/save.js"></script>
+<script src="js/ui/dom.js"></script>
+<script src="js/ui/start-screen.js"></script>
+<script src="js/ui/topbar.js"></script>
+<script src="js/ui/map.js"></script>
+<script src="js/ui/galaxy-view.js"></script>
+<script src="js/ui/nav.js"></script>
+<script src="js/ui/tech-view.js"></script>
+<script src="js/ui/empire-view.js"></script>
+<script src="js/ui/planet-screen.js"></script>
+<script src="js/ui/sheet-content.js"></script>
+<script src="js/ui/battle-view.js"></script>
+<script src="js/ui/render.js"></script>
+<script src="js/ui/toast.js"></script>
+<script src="js/ui/sheets.js"></script>
+<script src="js/game/planet-nav.js"></script>
+<script src="js/game/actions.js"></script>
+<script src="js/game/military-actions.js"></script>
+<script src="js/game/survey-actions.js"></script>
+<script src="js/game/event-card.js"></script>
+<script src="js/game/swipe.js"></script>
+<script src="js/game/turn.js"></script>
+<script src="js/game/save-actions.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,546 @@
+# Stellar Dominion — MVP v3.0
+
+Multi-file version of the original single-file prototype. The markup, styles and game logic live in separate files, with no build step and no dependencies.
+
+The original prototype is untouched at [`../index.html`](../index.html) and remains the reference build.
+
+**New map model:** the old 24-hex map is now one **sector**. The main map is a **ring galaxy**: the home sector sits at the centre, and procedurally generated sectors form concentric **circular** rings linked by seeded jump lanes. The inner rings are spaced wider than the rim, and the map pans in both axes. Each sector's 24-hex map is seeded too, with a mirrored landing port on its perimeter for every lane.
+
+**Economy and movement pass:** ships now have **speed** and **power** stats. In-sector movement is no longer free: you order a route to any hex, preview it on the sector map, and each ship advances along it by up to its speed when the turn ends. Gate jumps burn energy and arrive on the lane's landing port. An active research project has an energy upkeep, and ships leave a spaceport queue after one turn instead of appearing instantly.
+
+**Event and survey pass:** encounter cards are no longer drawn every turn. The opening card lands on turn 1, then one card is due every **3 turns**; turns in between go straight back to free actions. Cards are grouped into **categories** with editable weight multipliers and **probability buckets** that decide which cards can be drawn. Sectors now seed hidden **survey sites** (ruins, moons, asteroids, derelicts and spatial anomalies); a **science ship** stationed in the site's hex can study it for N turns for a reward.
+
+**Military and rival pass:** the player is no longer alone. Seeded **rival empires** spawn across the rings, with weaker near-core neighbours and stronger rim powers. Corvettes can hold a **patrol** stance (radius 1) and attack hostiles that enter their zone; builders can raise **strongholds**, static defenders with power 6 and a radius-2 zone. Rivals grow through a small **AI state machine**, raid player space with their own corvettes, and fight the same combat resolution as the player. Charted space, landing hexes and patrol coverage are toggleable sector-map layers.
+
+**Intelligence and radar pass:** every sector has a local **INTEL** stat. It starts at **1** and each online **Radar** built by a builder adds **+1**. A sector can forecast raiders entering it up to **INTEL turns** ahead: the lane's landing hex turns red and a small **nT** countdown shows how many end-turns remain before contact. The old **N RAIDER** topbar count is gone.
+
+**Battle UI pass:** a charted hostile hex where combat can happen now carries a pulsing **⚔** badge and an orange dashed border — not only a shared hex, but also a hostile hex covered by a patrol or stronghold firing from a neighbouring hex. Tapping the war icon opens a dedicated battle sheet with both fleet manifests, per-hull stats, a single player-vs-enemy balance bar and a concentrated-fire forecast for the next resolution. Ranged units show their distance; units without a firing solution are tagged **NO RANGE** and do not join a volley.
+
+**Population pass:** the **Residential Block is gone** and population is no longer housed by a building. A colony's **housing** is bought with a standing **mineral upkeep** and its **sustenance** with a standing **energy upkeep**, both set from a new **population menu** that opens when you tap the **POPULATION** card on a planet. Housing is the hard cap; sustenance is the growth multiplier. Colonies still have **planet size** (Small 3, Medium 4, Large 6 building slots, rolled 25 / 50 / 25) and up to **2 locked bonus slots** (10% for +1, 5% for +2) opened with energy and minerals. Buildings no longer block construction when no workers are free: a completed building always pays upkeep, but only produces in proportion to its crew (a Mine needs 2 workers, so 1 of 2 produces 50%).
+
+**Sector economy and trade pass:** energy and minerals are now **local to each sector** instead of one empire pool; only **research and influence** stay empire-wide. Every sector pays its own upkeep and funds the buildings, ships, structures and colonies built there. Builders can raise a **Trading Center** in an empty hex; it needs an operational **gate** in its sector and ships energy/minerals to any sector the gate can reach, with relay gates extending the network. The galaxy screen gained its own **VIEW** menu with a **Trade view** layer that draws every route between sectors.
+
+**Sector name pass:** sector names are now a lighter fog than hex charts. The galaxy map names the home sector, every sector one of your ships has **charted** (a fleet, colony or player structure charts its hex too) and every sector one lane around a charted or held sector. A gate or trading center therefore publishes its neighbouring names on the map too, and every trade destination is a named sector because each relay hop leaves a gate sector. Name-only sectors keep their `?` marker and **UNCHARTED** meta; learning a name does not reveal what is inside.
+
+**Sector fog pass:** nothing inside a sector is published before it is charted. An unnamed galaxy node cannot be opened at all, a named but uncharted sector opens as empty fog with **—** summary tiles and no lane labels, and a rival's colony and site counts wait for a chart. Power is stricter still: **POWER**, hostile power, the **THREAT** tile, the **⚔** node meta and the topbar threat chip only show while a ship, colony or structure of yours is active in that sector right now. The gate-jump rows, trade destinations and rival dossiers follow the same gates.
+
+**Fleet icon pass:** the sector map now draws one badge per fleet. A hex holding only corvettes, only science ships or only builders wears that hull's icon, tinted blue, cyan or gold; a hex holding different types falls back to the generic **🛸** ship icon with a steel tint. The ship count stays on the badge, the hex's screen-reader label names the hull mix, and the fleet tab mirrors the same icon and tint. See **Fleet icons** below.
+
+**Tech tree pass:** the tech tab is split into three categories. **Buildings** carries three levels for each of the four buildings; **Military** carries a power / hull / speed line for every hull plus the stronghold line; **Trade & Exploration** carries the radar, gate-throughput and trading-center lines. A completed tech never upgrades an existing asset: it only raises the level that asset **may be refitted to** (new construction opens at the unlocked level). A building that predates the tech is refitted from its colony slot for half its build cost; a ship is refitted — and repaired — from the fleet tab's **DRYDOCK**, which needs an operational spaceport in the ship's sector. Gates now spend jump **ops** and trading centers run more than one route. See **Technology tree** below.
+
+**Save pass:** a run can now be saved and loaded without a backend. The topbar **SAVE** chip opens a run archive that writes a quick save to `localStorage` or downloads the whole run as a readable JSON file; the start screen offers **CONTINUE** for that browser save and **LOAD SAVE FILE…** for a downloaded file. A snapshot stores the complete mutable state plus both RNG stream positions, so a loaded run continues on the same turn and draws the same next encounter card. See **Saving and loading** below.
+
+**Ranged battle pass:** the battle sheet now covers patrol and stronghold fire across hexes. A hostile hex under patrol/stronghold fire gets the same **⚔** badge and a **RANGED DEFENCE** callout in both the hostile hex's and the defended hex's fleet tab. The balance and forecast only count units with a firing solution, so a stationary corvette caught by a patrol cannot return fire and a stronghold firing from radius 2 is shown as a static defender. The callout opens the same sheet from either side of the fight.
+
+## Rival empires, patrols and strongholds
+
+- **Seeded rivals** — galaxy generation calls `createRivalEmpires()`. The count (5–7), spawn sectors, names, archetypes and starting fleets come from a seeded stream that is independent of the event deck. Every ring gets one spawn before extra empires are placed, so the same seed always produces the same powers.
+- **Difficulty by ring** — an empire's tier is its galaxy ring. Starting corvettes are `1 + ring` (**2 / 3 / 4 / 5**), the fleet cap is `2 + ring` (plus archetype bonuses), and rings 3–4 open with a stronghold over their central approach. Average fleet power rises from near-core to rim.
+- **Empire model** — a rival owns a capital system (`system.owner`) and can claim more unowned systems in its own sector (up to `1 + ceil(ring/2)` plus archetype bonuses). Rival ships live in `sector.rivalFleets`; player ships stay in `sector.fleets`. Rival colonies cannot be colonised by the player.
+- **AI state machine** — each empire runs `GROW`, `PATROL`, `FORTIFY`, `RAID` or `REGROUP` for 2–4 turns, then rolls a weighted transition. It buys corvettes, claims systems, builds one stronghold, launches a raid group or recalls raiders. Archetypes (marauder / builder / opportunist) bias aggression, fleet size, income, colony growth and raid odds. The AI's mineral reserve is abstract; it does not run the player's colony/worker economy.
+- **Raids** — a raid group (1–3 corvettes, scaled by ring) crosses lanes toward the nearest sector with player presence, up to `raidLaneRange` lanes away (2 by default). Rival fleets use lane jumps without a gate; their logistics are abstracted. Raids can begin from turn 4 and at most two can be active at once. Outer powers stay quiet until the player expands near them. A sector's **INTEL** forecasts each incoming lane: when the ETA is within the stat, its landing hex is red with a countdown.
+- **Contact** — charting any hex in a rival's sector, or fighting their ships, meets the empire once and writes a military dispatch. Discovered powers appear under **EMPIRE → RIVAL POWERS**; tap one for its dossier (state, tier, fleet, reserve, last action).
+- **Patrol** — select a corvette in the **FLEET** tab and press **SET PATROL**. It stays in its hex, fires on one hostile ship within **1 hex** when the turn resolves, and protects every hex in that radius from raids. A warship without patrol still fights in its own hex. Moving or gate-jumping cancels patrol. Patrol coverage is drawn on the sector map as one cyan layer shared by corvettes and strongholds, and is listed in the fleet tab. When the patrol fires into a neighbouring hostile hex, that hex carries the **⚔** badge and both hexes' fleet tabs offer a **RANGED DEFENCE** forecast.
+- **Map layers** — in a sector, the **VIEW** button beside **← GALAXY** opens a layer menu. **Charted space** is an opt-in blue wash over every charted hex that dims the remaining fog; the **Landing hexes** layer is on by default and labels each perimeter port with the sector whose ships arrive there; **Patrol coverage** is on by default and merges every patrolling corvette's radius-1 zone and every online stronghold's radius-2 zone into the same cyan layer. The menu reports the charted count, the landing count, the patrol source counts and covered hexes, and the button keeps a cyan dot while any layer is active. **Red raid warnings** are always visible on their landing hex, even when landing labels are hidden; the badge reads **nT**, meaning n end-turns until entry.
+- **Stronghold** — a builder can construct one in an empty hex for **10 minerals** (one turn). It is a static defender: **power 6**, attack 3, hull 10, **patrol radius 2**, and **2 energy upkeep** per turn while online. It contributes to sector PWR, stops raids in its coverage and can be destroyed. A stronghold firing into a covered hostile hex is listed in that engagement as a static, ranged defender. Ring-3/4 rivals start with one; every rival can raise one in `FORTIFY`.
+- **Combat** — `resolveMilitaryTurn()` runs once per turn after both fleets move. Every warship or stronghold picks one hostile in range (warships preferred, then strongholds, then civilians), damage is simultaneous, and hull is persistent. The battle readout uses the same reach — in-hex units, a patrol's radius 1 and a stronghold's radius 2 — and only units with a firing solution contribute to the projected volleys. Destroyed ships leave their fleet. The player salvages **2 minerals per rival corvette** and **6 per rival stronghold**. Player ships repair 2 hull per turn at an operational spaceport; strongholds repair 1; rival ships repair 2 at their capital.
+- **Battle view** — a charted hostile hex where combat can happen becomes a pulsing **⚔** badge with an orange dashed border, and the adjacent fleet badges still show both ship counts (a per-hull icon for a single-type fleet, the generic ship icon for a mixed hex). This covers an in-hex fight, a hostile hex covered by a patrol or stronghold, and a hostile battery firing at a player hex; the fleet tab of the defended hex offers the same sheet. Tapping the war icon opens a dedicated sheet instead of the hex dossier; the same sheet is reachable from a **BATTLE IN PROGRESS** or **RANGED DEFENCE** callout at the top of the fleet tab. It lists both sides with current hull, attack, power, speed, patrol/static and distance tags; shows fleet totals; draws one balance bar with the player on the left and the enemy on the right; and forecasts next-turn losses, remaining ships and hull, and the exchange winner. Only units with a firing solution contribute to the forecast; the rest show **NO RANGE**. The forecast is a concentrated-fire estimate and never consumes the combat RNG.
+- **Raids on colonies** — a surviving rival warship in a player colony hex loots up to 3 minerals and costs 1 stability **unless** a player patrol or stronghold covers that hex. The topbar threat chip only shows **PWR n** when the sector you are viewing contains hostile power; raider counts are no longer displayed there. Incoming raids appear on their entry hex through the sector's **INTEL** forecast, and the sector summary's **THREAT** tile still shows all hostile power in the sector.
+
+## Population, planet size and workforce
+
+- **Planet size** — rolled when the galaxy is generated from `CONFIG.planetSlots.sizes`: **Small 3 slots** (25%), **Medium 4 slots** (50%), **Large 6 slots** (25%). Every planet, including the capital, gets a size. Standard slots are open as soon as the planet is colonised; the old time-based slot milestones are gone.
+- **Bonus slots** — `CONFIG.planetSlots.bonus` rolls 0, 1 or 2 locked bonus slots (85% / 10% / 5%). They sit after the standard slots and open **in order** for `CONFIG.planetSlots.unlockCost` (**5 ⚡ + 8 ⛏** each). A locked slot is a tappable unlock tile on the colony screen; once paid it becomes an ordinary empty building slot.
+- **Housing** — the Residential Block is **removed**. Every colony owns a founding shelter (`CONFIG.population.homeBaseCap` **3** for the capital, `colonyBaseCap` **1** elsewhere). Each **2 ⛏ of standing housing upkeep** (`CONFIG.population.housing.mineralsPerHouse`) buys **one house**, up to the planet's size in extra houses (Small +3, Medium +4, Large +6). The house count is a **hard cap**: growth stops there and a housing cut that would leave more people than houses is refused.
+- **Sustenance** — each **1 ⚡ of standing sustenance upkeep** feeds `CONFIG.population.sustenance.populationPerEnergy` **2** population. Supply below demand slows growth in proportion; feeding everyone is **100%** and a surplus pushes the multiplier to `maxMult` **125%**. The five tiers are `STARVING` → `MALNOURISHED` → `FRUGAL` → `CONTENT` → `THRIVING` (`CONFIG.population.sustenance.tiers`).
+- **Population menu** — tapping the **POPULATION** card on a colony opens a sheet with the current population, houses, sustenance meter, growth forecast and two steppers: **Housing Upkeep** (minerals) and **Sustenance Upkeep** (energy). Each press is one step; the sheet repaints live and the card on the colony screen reports the same two stats. The steppers are bounded by the planet's size and by the upkeep needed for its biggest possible population.
+- **Saturating growth** — each turn a colony gains `growthRate × sustenanceMultiplier × (1 − population / housing)` population, with `growthRate` **1.5**. At 3/4 houses and 125% sustenance that is **+0.47/turn**, so the next population is 3 turns away. Fractional growth is banked in `system.growthProgress`, so +0.47/turn still adds a population after three turns.
+- **Population upkeep and deficits** — both upkeeps are standing orders paid from the colony's **sector ledger** when the turn ends: minerals for housing, energy for sustenance. If the sector cannot cover them, that stock goes negative and the usual **−2 stability** applies once that turn. A negative mineral stock still blocks every mineral purchase, so a colony that over-funds its houses must trade or mine its way back.
+- **Workers** — every productive building declares a `workers` requirement in `js/data/buildings.js`: **Mine 2**, Power Plant 1, Lab 1, Embassy 1. Workers are assigned in **slot order**. A Mine with 1 of 2 workers produces **50%**; with none it produces nothing. Every **completed** building pays its full energy upkeep, staffed or not. Under-construction buildings produce nothing and pay no upkeep.
+- **Build without workers** — the build sheet is gated only by the sector's minerals. If no workers are free, the building still completes; it waits as `IDLE · 0/N WORKERS` or runs understaffed as `UNDERSTAFFED · 1/N WORKERS · 50% OUTPUT` until population grows.
+- **Fractional yields** — partial output is summed per planet and per sector. The topbar and breakdowns show one decimal when needed, and `sector.carry` banks fractions between turns so a 1.5/turn income pays 1 then 2 instead of losing the half every turn. Research and influence use `state.resourceCarry` in the same way.
+
+## Sector economy and gate trade
+
+- **Local stockpiles** — every sector keeps its own energy and minerals in `sector.economy` (`{ energy, minerals }`); fractional income is banked in `sector.carry`. `state.resources` now only holds `research` and `influence`, which are empire-wide. The home sector starts with the `CONFIG.startingResources` energy and minerals; every other sector starts empty.
+- **What is paid where** — colony overhead, every completed building's energy upkeep and a colony's **population sustenance** are charged to the sector that hosts them. **Population housing** is a mineral charge on the same sector. Online strongholds, radars and trading centers draw their upkeep from their own sector, and an active research project draws `CONFIG.research.energyUpkeep` from the **capital sector**. Building, ship, structure and colonisation minerals are paid from the sector the action happens in; gate jumps burn the **origin sector's** energy; raids loot the colony's sector; battle salvage is banked where the hull died. Influence costs stay empire-wide.
+- **Deficits** — if *any* sector's energy **or mineral** stock is below zero after upkeep, stability takes the usual **−2** once that turn. One sector cannot pay another's bills; population housing is the one standing order that can push a mineral stock negative.
+- **Sector and empire views** — `getSectorEconomy(sectorId)` returns one sector's sources, income, upkeep (energy and minerals), gate-trade flow and net; `getEconomy()` sums every sector for research and influence and keeps the per-sector list in `.sectors`. The topbar shows the current sector's energy/minerals and the empire's research/influence, the sector summary gained **ENERGY** and **MINERALS** tiles, and the Empire tab lists every sector ledger (click a row to open that sector).
+- **Trading center** — a builder can raise a **Trading Center** in an empty hex for **8 ⛏**, online after one turn. It draws **1 ⚡ upkeep** and only operates while its sector holds an operational **gate**. Open the center's hex, choose a destination and set energy/mineral amounts (0–20 each) with the stepper controls; the route is saved and runs every turn.
+- **Trade reach** — `getTradeReach()` walks the galaxy lanes. The center's own sector can always open the first hop; every further hop must leave a sector that also has an operational gate, so **relay gates** extend the network. `CONFIG.trade.maxHops` caps the chain at 4 hops. A destination outside the reach is refused with a toast and the center keeps its previous route config.
+- **Resolution** — after production each active route sends up to its configured amounts, never more than the source sector holds. Shipments are recorded on the center (`structure.lastTrade`) and shown in the dossier. A center pays upkeep even with no route or no gate; it simply ships nothing that turn.
+- **Trade view** — the galaxy screen has its own **VIEW** button (same control as the sector map). It opens the galaxy layer menu with a **Trade view** switch. With the layer on, the ring graph draws every route as a violet curved line with a `⚡n ⛏n` label, trading sectors get a **🏪** badge, and the panel under the graph lists each route with its status, hop count and per-turn amounts. Panel rows open the source sector.
+- **Data and code** — the trading center's cost, upkeep and trade flag live in `js/data/structures.js`; `CONFIG.trade` sets the hop cap and amount cap. Gate reach, route status, transfers and the galaxy summary live in `js/core/trade.js`; the ledgers and sector/empire breakdowns live in `js/core/economy.js`.
+
+## Technology tree
+
+- **Three categories** — the TECH tab opens on **BUILDINGS**, **MILITARY** or **TRADE & EXPLORATION** (`TECH_CATEGORIES` in `js/data/techs.js`). Each category groups its techs by the thing they upgrade (Mine, Power Plant, Corvette, Stronghold, Radar, Gate, Trading Center…) and every group header reports how many of its cards are complete. The tab lists nothing outside those three categories.
+- **Catalogue** — 45 techs across the three categories: 12 building, 23 military and 10 trade & exploration. (`TECHS.ascension` is still defined — it is the win-condition project — but the tech tab no longer lists it and nothing pins it under a category.) Every tech declares `category`, `group`, `tier`, `cost`, a one-line `effect`, a flavour `detail` and an optional `requiresTech` chain. The tab renders from `TECH_ORDER`, which is built out of the category and group order, so adding a tech is a data-only change.
+- **Techs never upgrade anything by themselves.** A completed tech only raises the level an asset **may be refitted to**. A building or hull laid down *after* the tech already opens at that level; anything that was standing when the tech completed keeps its old numbers until the player pays for the refit. Every screen that shows the asset repeats that rule next to the order button.
+- **Building levels** — every building has a level from 1 to 4 (`BUILDINGS.<type>.maxLevel`). Its level 1 yield lives in `BUILDINGS.<type>.output` and every extra level adds `BUILDINGS.<type>.perLevel`, so a Mine reads **3 / 4 / 5 / 6 ⛏**, a Power Plant **4 / 5 / 6 / 7 ⚡**, a Lab **2 / 3 / 4 / 5 🔬** and an Embassy **2 / 3 / 4 / 5 🏛**. Three techs per building unlock levels 2, 3 and 4.
+- **Building refit** — a building that predates its tech shows a **REFIT** button on its colony slot with the next level and price; new construction is laid down at the unlocked level and never needs it. The refit costs **half the building's own build cost** (`CONFIG.upgrades.buildingCostShare`, rounded up: Mine 3 ⛏, Power Plant 3 ⛏, Lab 4 ⛏, Embassy 4 ⛏), is paid from the colony's sector and applies immediately. A short ledger disables the button instead of hiding it; a slot at the unlocked cap shows the usual ✓.
+- **Ship refits** — every hull declares an `upgrades` table in `js/data/ships.js`: the stat points gained per installed level for **power**, **hull** and **speed**. The Military category unlocks two levels per stat per hull (18 techs). A hull laid down after the tech launches already refitted; a hull that predates it keeps its old stats until it is ordered through the drydock. The fleet tab's **DRYDOCK** lists each hull with its installed/total refit levels (`⬆ 2/6 REFITS`), the stats waiting for it and a **REFIT** button that installs every waiting level at once for `CONFIG.upgrades.shipMineralsPerLevel` minerals per level.
+- **Drydock requirement** — refits and repairs are only offered while an **operational spaceport** stands anywhere in the ship's sector. Without one the DRYDOCK section explains what is missing and no order buttons are rendered. A hull refit that raises the hull maximum also restores the plating it adds, so a refitted ship never arrives damaged.
+- **Repair** — the DRYDOCK's **REPAIR** button tops a damaged hull up to its maximum immediately for `CONFIG.upgrades.repairMineralsPerHull` minerals per missing point (minimum 1). It is disabled on a full hull. The spaceport's free slow repair (2 hull per turn while docked) still runs every turn.
+- **Stronghold line** — five techs sharpen the static defender: **Planetary Defense** and **Orbital Crossfire** (+1 attack each), **Bastion Plating** and **Reinforced Bastion** (+4 hull each) and **Extended Coverage** (radius 2 → 3). They apply to every player stronghold at once, because a stronghold is a static platform: a completed hull tech bolts its new plating on immediately and a new stronghold launches at the upgraded maximum. Rival strongholds never benefit.
+- **Radar line** — **Signal Analysis I / II** raise each online radar from +1 INTEL to +2 and then +3, widening the raid forecast window on the sector map.
+- **Gate throughput** — every operational gate accepts `CONFIG.gates.baseOps` (1) fleet jumps per turn. **Gate Throughput I / II / III** raise that to 2, 3 and 4 ops **per gate**, so two gates in one sector double the capacity. One op is spent per fleet jump, the fleet tab shows `n / m OPS LEFT`, a spent gate disables the jump rows and the counter resets when the turn number changes.
+- **Trading center routes** — a center runs one route by default. **Trade Network I / II / III** raise every center to 2, 3 and 4 route slots. Each slot owns its destination, energy/mineral amounts, status, last shipment and clear button in the hex dossier; routes ship in slot order after production and never more than the source sector holds. `structure.routes` holds them and `structure.trade` stays aliased to route 0 for older call sites.
+- **Data and code** — the catalogue, categories and groups live in `js/data/techs.js`; the level tables live in `js/data/buildings.js` and `js/data/ships.js`; `js/core/helpers.js` owns every derived tech number (`getBuildingUnlockedLevel`, `getBuildingUpgradeCost`, `getShipPendingUpgrades`, `getRadarIntelValue`, `getGateOpsPerGate`, `getTradeRouteCap`, …); `js/game/actions.js` owns the building refit, ship refit and repair orders; `js/ui/tech-view.js` builds the category tab, the group headings and the cards.
+
+## Event deck
+
+- **Paced draws** — `CONFIG.events` owns the cadence. `openingTurn` (default 1) is when the first card lands and `interval` (default 3) is how many turns apart the rest are. `intervalRamp` can accelerate the deck later. The topbar **EVENTS** chip opens the live **event deck** sheet; the schedule and the next encounter turn are no longer shown.
+- **Categories** — every card belongs to `discovery`, `contact`, `economy` or `hazard` (`EVENT_CATEGORIES`). Each category has one `weightMult`; set it to `0` to retire the whole group without touching its cards.
+- **Buckets** — `EVENT_BUCKETS` maps a category to the card ids it can draw. Add an id to include a card, remove it to retire the card while keeping its definition in `EVENTS`. Each card also has its own `weight`, a `minTurn` unlock and an optional `maxTurn`.
+- **Live weights** — weights and multipliers are read on every draw. `setEventCategoryWeight(id, mult)`, `setEventWeight(id, weight)`, `addEventToBucket(category, id)` and `removeEventFromBucket(category, id)` retune the deck at runtime. `validateEventDeck()` warns at boot if a bucket and a card disagree.
+- **No immediate repeats** — the card played last is skipped while any other eligible card exists. `state.rng` is seeded from the galaxy seed, so the same seed deals the same deck.
+
+## Survey sites and science ships
+
+- **Sites** — sectors are seeded with 0–2 survey sites on **empty hexes** (the home sector always gets one). Site types are planets, moons, asteroids, derelicts and spatial anomalies (`js/data/anomalies.js`), each with its own `studyTurns` and reward bundle.
+- **Discovery** — a site stays hidden under fog until a ship charts its hex. Charting fires a one-time **Survey site detected** toast; the hex marker, the sector summary (`SITES`) and the galaxy node (`🔭`) then show it.
+- **Study** — open the hex's WORLD tab (or the FLEET tab) and press **BEGIN SURVEY** with a science ship stationed in that hex. The study ticks down at the end of each turn while a science ship remains; if it leaves, the survey **pauses** and keeps its progress. At zero the reward is paid once and the site reads SURVEYED.
+- **Science ships** — the only ships that can survey, they travel 2 hexes per turn, and their fleet entry is tagged `🔭 SURVEY`.
+
+## Saving and loading
+
+- **Manual saves** — there is no autosave. The top bar's **SAVE** chip (shown during the action phase) opens the **Save & load** run archive: **SAVE TO BROWSER**, **LOAD SAVED RUN**, **DELETE SAVED RUN**, **DOWNLOAD SAVE FILE** and **LOAD SAVE FILE…**. The start screen shows **CONTINUE** whenever this browser holds a readable save, and keeps **LOAD SAVE FILE…** available so a downloaded run can be opened on a fresh device.
+- **What a save holds** — `createSaveSnapshot()` copies the whole mutable `state` as JSON: the galaxy and every sector (fog, fleets, rival fleets, structures, survey sites, ledgers and carry), every system (slots, buildings, population, housing/sustenance upkeep and growth), rival empires with their AI state, military counters and log, tech progress, event history, resources and stability, and the tab, viewed sector, map mode and layer preferences.
+- **What it trims** — the open sheet, a half-ordered fleet move, the selected hex/system, the spaceport menu and the event resolve lock are not restored. A loaded run always reopens on a screen the DOM can build.
+- **Deck continuity** — `createRng()` exposes `getState()` and `setState()`, so the snapshot also stores the two stream positions (`state.rng` for the encounter deck and `state.military.rng` for rival AI and combat). A loaded run deals the same next card and resolves the same military turn as the run it replaced.
+- **Event phase** — a save taken between the draw and the choice keeps `phase: "event"` with the pending card, and `applySaveState()` re-shows the event layer. The SAVE chip is hidden while a card is open, so this is mainly a safety net for programmatic saves.
+- **Format and errors** — a save is `{ format: "stellar-dominion-save", version: 1, savedAt, state, rngStreams }`. `readSaveSnapshot()` rejects another file type, another `SAVE_VERSION`, a missing galaxy or a non-playable phase with a toast. A downloaded file is named `stellar-dominion-<date>-turn-<n>-seed-<seed>.json`.
+- **Storage** — the browser slot is `localStorage["stellar-dominion-mvp3-save"]`. `localStorage` is per browser and device and can be blocked (Safari private mode, some embeds); the save file works regardless. A turn-3 file is about **216 KB** of readable JSON, well inside the usual 5 MB `localStorage` budget.
+- **Loading replaces the run** — `applySaveState()` swaps the global `state`, clears timers and drag state that outlive a run, hides the start/end/planet screens, repaints every view and shows a pending event if one was saved. The current run is gone unless it was saved first.
+- **Code** — snapshot, validation and restore rules live in `js/core/save.js`; browser/file transport and the start-screen card live in `js/game/save-actions.js`; the archive body is `saveSheetHTML()` in `js/ui/sheet-content.js`, opened by `openSaveSheet()` in `js/ui/sheets.js`. Bump `SAVE_VERSION` whenever the state shape changes incompatibly.
+
+## Run it
+
+- Double-click `index.html`, **or**
+- Serve the folder over HTTP:
+
+```bash
+cd "MVP V3.0"
+python3 -m http.server 8000
+# open http://localhost:8000
+```
+
+Classic scripts are used on purpose (not ES modules) so that opening `index.html` directly from the filesystem keeps working. All paths are relative.
+
+Browser saves use `localStorage`; the run archive also downloads and loads a plain `.json` save file, so saving needs no build step, backend or database.
+
+## Map model
+
+- **Sector** — a 4 × 6 hex grid: **24 hexes**. Defined by `CONFIG.sector`. Generated sectors hold 4–6 seeded systems; the home sector has the fixed capital plus four seeded systems.
+- **Galaxy** — a sequence of concentric **circular** rings around the home core. Ring 1 holds 4–6 sectors; each further ring grows by 2. By default the galaxy has four outer rings, producing **37 sectors on the default seed**: the core, then 6 / 8 / 10 / 12 sectors. Every non-core sector links **inward** to one seeded parent, **outward** to one or more children (the outer rim has none), and **sideways** to its two ring neighbours. Rings 2–4 also get 0–1 short seeded shortcuts, so the lane graph changes with the seed. Radial spacing follows `radiusCurve`: the core-to-ring-1 and ring-1-to-ring-2 gaps are wide, while rings 3 and 4 are packed closer to the rim.
+- **Reproducibility** — `CONFIG.galaxy.seed` drives the ring sizes, randomized parent lanes, shortcuts, sector names and every sector map through seeded RNGs (`js/core/rng.js`). Each sector map uses its own seed derived from the galaxy seed and sector id, so map generation is reproducible. The same seed always produces the same galaxy. The seed and ring count are shown under the graph.
+- **Home sector** — `Solara Core`, the centre of ring 0. The capital `Solara` is fixed on the entry hex; its four other systems are seeded. Generated sectors use the planet and name pools in `js/data/systems.js`.
+- **Navigation** — the MAP tab is the ring galaxy. The core is at the centre; rings expand outward. Tap a node to open its 24-hex sector; `← GALAXY` goes back. The 700 × 720 graph sits inside its own stage, which scrolls on **both axes**; returning to the galaxy (or switching back to the GALAXY tab) scrolls the current sector into view (centred when the stage range allows). Uncharted sectors show as `?`; names follow the lighter fog described under **Sector names** below. A node whose name is still unknown refuses to open: the tap raises **No charts for that sector yet** and leaves the galaxy where it is. A known name opens a page that is pure fog until a ship has charted something there.
+- **Sector names** — `isSectorNameKnown()` decides which galaxy nodes show a name. A name is known when the sector is charted by the player (at least one hex is in the atlas, which a ship visit, a player fleet, a player colony or a player orbital structure all imply), holds player presence, is the home sector, or is one lane from a sector that is charted or held. Charting one sector therefore publishes its own name and the names one lane out, and the fog stops there: a name-only sector never names another lane, so clicking around the galaxy cannot peel the fog back. `sectorHasPlayerPresence()` counts a player colony, a surface building or any player orbital structure (including one still under construction); rival assets never count. Because a gate or trading center is player presence, its sector publishes the names one lane out, and every relay gate along a trade route does the same, so every destination the trade editor lists is already named. Learning a name is not charting: a named but uncharted node keeps the dashed **?** marker and **UNCHARTED** meta, and its colony/fleet/site counts, lane ports and summary tiles stay hidden until the sector is charted. Power numbers are gated one step further (see **Sector power**). `getSectorLabel()` is the only label a screen may print, and it returns **Unknown sector** when the fog does not allow the name.
+- **Sector fog gates** — every screen asks the same helpers. A charted sector opens as usual; a named but uncharted sector opens as an empty 24-hex fog with **—** tiles, no INTEL, no lane ports and no raid warnings. The topbar threat chip, the galaxy node meta and PWR chips, the gate-jump rows, the trade editor's destination counts and met rivals' dossier/dispatch text all respect the same gates. A rival flag or colony **count** needs a chart, while a power **number** (yours or theirs) needs the player to be active in the sector. A rival's home-sector name is masked in its dispatch text until that sector is charted.
+- **Seed picker** — the start screen has a galaxy-seed field and a **RANDOM** button. A number starts that exact galaxy; text is hashed to a numeric seed. The chosen seed is shown under the graph and reused if you play again.
+- **Fog and ownership** — explored hexes, fleets, colonies and sector-visit status are stored per sector. A ship visit, a fleet, a player colony or a player orbital structure charts its hex; a rival colony's hex waits for a player ship. Energy and minerals are stored per sector too; research and influence are the only empire-wide stockpiles.
+- **Visited** — a sector is counted as visited once you have charted something there (fleet, colony or explored hex) or jumped into it. Inspecting a fogged sector from the galaxy map does not count as a visit.
+- **Builder** — a new construction vessel. Builders are the only ships that can construct orbital structures, and they can only do so in a hex with no planet. Each empty hex holds one structure. The starting fleet includes a builder. Builders can raise spaceports, gates, radars, trading centers and strongholds.
+- **Spaceport** — an orbital shipyard. The home capital starts with one pre-built; builders can construct more in empty hexes for 8 minerals (one turn). Open a spaceport hex's WORLD tab, then tap the **Spaceport** card to open its ship-construction menu and build Corvettes (4 minerals), Science Ships (3) or Builders (5). The build list and keel queue stay collapsed until the card is tapped. A ship is paid for and laid down immediately, then launches into that hex's fleet when the next turn begins. Every ship has a one-turn build time for now; a spaceport can hold a multi-ship queue. Only a spaceport can build ships.
+- **Radar** — a builder-built listening post. It costs **5 ⛏**, comes online after one turn and draws **1 ⚡ upkeep**. Each online radar adds **+1** to its sector's **INTEL**, widening the raid forecast window by one end-turn. Build several in different empty hexes to stack the bonus. The sector header shows the live **INTEL** value and the map draws detected entry lanes in red with an **nT** countdown.
+- **Stronghold** — a builder-built static defender (10 minerals, one turn). See the military section above for its stats and upkeep. Rival strongholds also appear on the map and fight in the same resolution.
+- **Gate** — an orbital jump corridor. Builders can construct one in an empty hex for 6 minerals; it comes online after one turn. A fleet can make an intersector jump only while it is in a hex with an operational gate. Select ships in the Fleet tab and choose a **GATE JUMP** destination; a gate permits jumps to adjacent sectors, and the destination does not need its own gate. Each jump burns **2 energy** from the **origin sector's** ledger, lands on the target sector's **landing hex** for that lane, and clears any queued in-sector route on the ships that leave. Without a gate, no ship can cross sectors, regardless of type. A gate also powers every trading center in its sector and relays trade outward.
+- **Trading center** — a builder-built orbital exchange (8 minerals, one turn). It draws **1 energy** upkeep from its own sector and only works while that sector holds an operational gate. Pick a destination and set energy/mineral amounts in its hex dossier; shipments leave after production each turn and never take more than the source sector holds. See **Sector economy and gate trade** above for the reach rule.
+- **Fleet icons** — the sector map draws one badge per occupied hex. A hex holding a single ship type wears that hull's icon — **🚀** corvette, **🛰️** science ship or **🏗️** builder — with a count and a matching blue, cyan or gold border. A hex holding different types falls back to the generic **🛸** ship icon with a steel border. The badge is a small capsule with the icon on the left and the count on the right, and the hex's ARIA label names the hull mix, for example *fleet of 4 ships (2 corvettes, 1 science ship, 1 builder)*. The fleet tab's summary emblem uses the same icon and the roster's icon frames use the same tint.
+- **Ship stats and routes** — every ship has a speed (hexes it can follow per turn) and a power value, and hull is its live health pool. Corvettes and Builders have speed 1; Science Ships have speed 2. Only corvettes are military and shoot; science ships and builders can be shot at but do not return fire. In the Fleet tab, select ships and tap **MOVE**, then tap any destination hex. The map previews the shortest route and the ETA for the selected group; **CONFIRM** assigns the route. Each ship follows its own route at its own speed when the turn ends, so a mixed group can split. Queued routes remain drawn as dashed lines until they reach the destination.
+- **Sector power** — each sector's power is the sum of the power values of every player ship inside it plus every **online player stronghold**. `isSectorPowerVisible()` publishes power readouts only while the player is active in the sector right now: a player ship, colony, surface building or orbital structure must sit there. A charted sector the player has left behind shows **—** in the **POWER** tile and draws no **PWR** chip. Hostile power is summed separately (`getSectorRivalPower()`) and feeds the topbar threat chip, the galaxy node **⚔** meta and the **THREAT** tile — and it obeys the same activity gate, so a chart alone does not reveal who is there now. The galaxy node's rival **⚑** flag is presence knowledge from the chart and does not need the activity gate.
+- **Research upkeep** — an active research project draws **1 energy per turn** from the **capital sector** until it completes. It appears in that sector's energy upkeep breakdown, in the research banner and on every tech card, and it is included in the capital sector's net energy delta.
+
+## Project layout
+
+```
+MVP V3.0/
+├── index.html                 markup only: app shell, galaxy, sector, overlays
+├── favicon.svg                ring mark for the browser tab
+├── README.md
+├── css/
+│   ├── base.css               design tokens, reset, shared type
+│   ├── topbar.css             sticky top bar, resources, economy-scope strip, stability, threat chip, EVENTS chip and SAVE chip
+│   ├── views.css              main views, 24-hex map, enemy markers, battle badge, raid-warning threshold, charted-space wash, patrol-zone overlays and the empire sector ledger
+│   ├── galaxy.css             circular graph stage, ring/radial/shortcut lanes, rival nodes, VIEW layer menus, trade routes and the trade panel
+│   ├── nav.css                bottom navigation
+│   ├── planet.css             hex/planet screen, colony slots and bonus-slot locks, clickable population card, clickable spaceport card, strongholds, radars, battle callout, patrol/contact readout, fleet tab, gate lanes, trading center route editor and sector ledger card
+│   ├── sheets.css             bottom sheet, population menu (steppers and sustenance meter), run archive, battle balance bar and forecast
+│   ├── event.css              event overlay and swipe card
+│   ├── screens.css            start/end screens, saved-run CONTINUE card, seed picker
+│   └── utilities.css          toast, small-screen and reduced-motion rules
+└── js/
+    ├── data/                  content and balance tables
+    │   ├── config.js          CONFIG: starting sector stockpile, planet sizes/bonus slots, population housing/sustenance/growth, research upkeep, trade reach/amount caps, jump cost, sector/ring layout, event cadence, survey density, military rules, rival count and seed
+    │   ├── ethics.js          ETHICS + display order
+    │   ├── buildings.js       BUILDINGS + display order, worker requirements, the level 1 output, the per-level increment and the level cap (housing is no longer a building)
+    │   ├── structures.js      STRUCTURE_TYPES: spaceports, gates, radars, trading centers and strongholds
+    │   ├── ships.js           SHIP_TYPES + display order, per-hull map icons, the generic mixed-fleet icon, costs, base speed/power/hull, the per-level refit table, refit stat vocabulary, build time and builder ability
+    │   ├── empires.js         RIVAL_EMPIRE_POOL, RIVAL_ARCHETYPES and the RIVAL_AI_STATES vocabulary
+    │   ├── techs.js           TECH_CATEGORIES, TECH_GROUPS, TECHS (cost, effect, prerequisites, refit levels, stronghold/radar/gate/trade payloads) and TECH_ORDER
+    │   ├── events.js          EVENTS + EVENT_CATEGORIES + EVENT_BUCKETS: cards, categories and draw buckets
+    │   ├── anomalies.js       ANOMALY_TYPES: survey sites, study turns and rewards
+    │   ├── resources.js       RESOURCE_META + key order
+    │   └── systems.js         home capital, sector names, planet/name pools
+    ├── core/                  game rules and calculations
+    │   ├── rng.js             seeded PRNG helpers
+    │   ├── galaxy.js          seeded ring topology, parent lanes, shortcuts, sector maps + rival spawn
+    │   ├── state.js           state factory, run counter, ship factory, starting fleet, military and rival state
+    │   ├── helpers.js         formatting, lookups, refit-aware ship hull/speed/power, building levels and refit costs, tech effect readers (radar, gate ops, trade routes, stronghold bonuses), sector power, sector INTEL and raid forecasts
+    │   ├── colony.js          planet size, standard/bonus slots, population policy (mineral housing upkeep, energy sustenance upkeep), hard house cap, saturating growth, slot unlocking and partial workforce plans
+    │   ├── hex-grid.js        neighbours, cube distance/radius, shortest-path routing, fog of war
+    │   ├── empires.js         rival lookups, presence, discovery, strongholds, raids and military log
+    │   ├── combat.js          patrol coverage, in-hex and ranged battle readouts/forecasts, simultaneous damage, raids, repairs, spaceport refit/repair rules and report
+    │   ├── rival-ai.js        rival state machine, growth, strongholds, raids and lane movement
+    │   ├── effects.js         shared applyEffects() for event choices and survey rewards
+    │   ├── survey.js          anomaly discovery, study progress, pause/resume and rewards
+    │   ├── event-engine.js    paced draws, category weights, buckets and deck summary
+    │   ├── trade.js           gate reach, gate jump ops, multi-route trading centers, route status, per-turn transfers and the galaxy trade summary
+    │   ├── economy.js         per-sector ledgers, per-planet breakdown, empire totals, research upkeep and income carry
+    │   └── save.js            save snapshot, validation, restore and metadata
+    ├── ui/                    rendering; reads state, writes DOM
+    │   ├── dom.js             cached nodes and shared render helpers
+    │   ├── start-screen.js    ethic picker + seed control
+    │   ├── topbar.js          sector-scoped energy/minerals, empire research/influence, economy-scope strip, stability, threat and the EVENTS deck chip
+    │   ├── map.js             sector hex map, per-hull fleet badges, survey sites, rival systems/ships, in-hex and ranged war badge, red raid-warning thresholds and INTEL header, toggled charted-space wash and patrol zones, routes, threats, the sector ledger tiles and the VIEW layer menu
+    │   ├── galaxy-view.js     circular ring graph, shortcut lanes, rival nodes, site counts, two-axis scroll-to-current, VIEW trade layer, trade routes and the route ledger panel
+    │   ├── nav.js             tab switching and view visibility
+    │   ├── tech-view.js       research banner, the category switch and the grouped tech cards of the open category
+    │   ├── empire-view.js     empire ledger, per-sector economy list, military summary, rival powers and dispatch log
+    │   ├── planet-screen.js   hex details, clickable population card, colony slots with their refit buttons and sector ledger, clickable spaceport ship construction and drydock refit/repair, survey sites, strongholds, radars and the per-route trading center editor, in-hex/ranged battle callout, patrol/contact dossier, fleet roster, jump ops and gate jumps
+    │   ├── sheet-content.js   HTML builders for the bottom sheet, including the population menu, sector/empire resource breakdowns, build picker, planet details, event deck and rival dossier
+    │   ├── battle-view.js     battle sheet: hero, balance bar, fleet manifests with ranged/distance tags, next-turn forecast and fleet-tab callout
+    │   ├── render.js          renderAll() entry point
+    │   ├── toast.js           transient feedback
+    │   └── sheets.js          bottom-sheet open/close, drag, the population menu open/refresh and the event deck inspector
+    ├── game/                  state mutations and interactions
+    │   ├── planet-nav.js      navigation, distant route preview/orders, sector-priced gate jumps that spend gate ops
+    │   ├── actions.js         colonise, build, building refits, ship refits and repairs, unlock bonus slots, population upkeep steppers, research, trading center route controls
+    │   ├── military-actions.js SET PATROL / STAND DOWN for selected corvettes
+    │   ├── survey-actions.js  BEGIN SURVEY / ABANDON SURVEY commands
+    │   ├── event-card.js      event rendering and choice resolution
+    │   ├── swipe.js           swipe-to-decide gesture
+    │   ├── turn.js            turn pipeline: per-sector upkeep, shipyard launches, movement, rival AI, combat, trade transfers, win/lose, new run
+    │   └── save-actions.js    browser quick save, JSON save files, load/continue and the start-screen summary
+    └── main.js                event wiring + boot (loaded last)
+
+tests/
+├── military-harness.js        Node VM logic checks for rivals, patrols, combat, strongholds, radars, INTEL forecasts and AI
+├── colony-harness.js          Node VM logic checks for planet sizes, slots, population policy, growth, workforce and upkeep
+├── population-harness.js      Node VM UI checks for the population card, menu, steppers and population upkeep sheets
+├── economy-harness.js         Node VM logic checks for sector ledgers, local costs, gate trade, trade upkeep and the turn pipeline
+├── name-harness.js            Node VM logic checks for charted names, the one-lane fog halo and the sector-power gate
+├── tech-harness.js            Node VM logic + UI checks for the three tech categories, building refits, ship refits and repairs, the stronghold line, radar/gate/trade techs and the new screens
+├── save-harness.js            Node VM checks for snapshots, validation, RNG and deck continuation and a full turn on a restored run
+└── fog-harness.js             Node VM UI checks for what the galaxy, sector, topbar and dossier screens may publish
+```
+
+## Load order
+
+The scripts are **classic scripts sharing one global scope**, so the order in `index.html` is the dependency order:
+
+```
+data → core (rng, galaxy, state, rules, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save) → ui → game → main
+```
+`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js` and `tests/save-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population and tech harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+
+`js/core/state.js` only declares `let state = null`. The run (including the galaxy) is created once every script is loaded, at the bottom of `js/main.js`:
+
+```js
+validateEventDeck();
+state = createInitialState(null);
+bindEvents();
+renderEthics();
+renderContinueSave();   // shows CONTINUE when localStorage holds a run
+renderAll();
+scrollGalaxyToCurrentSector();
+```
+
+When adding a file, add its `<script>` tag in the right layer and keep `main.js` last. Each file starts with a header comment describing its responsibility.
+
+## Where to change what
+
+| I want to… | Edit |
+| --- | --- |
+| Generate a different galaxy | Seed picker on the start screen, or `CONFIG.galaxy.seed` in `js/data/config.js` |
+| Change ring count, ring-one width, ring growth, parent randomness, shortcuts, systems per sector or the inner-ring spacing curve | `CONFIG.galaxy` in `js/data/config.js` |
+| Change sector size or entry hex | `CONFIG.sector` in `js/data/config.js` (`HOME_CAPITAL` follows the entry hex; landing ports follow the perimeter in `js/core/hex-grid.js` and are assigned in `js/core/galaxy.js`) |
+| Change how parent lanes or shortcuts are chosen | `js/core/galaxy.js` |
+| Add or rebalance ships, costs, speed, power or build time | `js/data/ships.js` |
+| Add or rebalance a tech, its category, group, tier, cost or prerequisite | `TECHS` / `TECH_CATEGORIES` / `TECH_GROUPS` in `js/data/techs.js` |
+| Change what a completed tech unlocks (building level, hull refit level, stronghold/radar/gate/trade payload) | that tech's payload fields in `js/data/techs.js`, read by `getBuildingUnlockedLevel`, `getShipUpgradeAvailableLevel`, `sumTechBonus` and `highestTechValue` in `js/core/helpers.js` |
+| Change a building's level 1 yield, per-level gain or level cap | `BUILDINGS.<type>.output` / `.perLevel` / `.maxLevel` in `js/data/buildings.js` |
+| Change the building refit price | `CONFIG.upgrades.buildingCostShare` in `js/data/config.js`, `getBuildingUpgradeCost` in `js/core/helpers.js` |
+| Change how many stat points a hull gains per refit level | `SHIP_TYPES.<type>.upgrades` in `js/data/ships.js` |
+| Change the refit or repair price, or the spaceport requirement | `CONFIG.upgrades` in `js/data/config.js`, `getShipRefitBlockReason` / `getShipRepairBlockReason` in `js/core/combat.js` |
+| Change how many fleet jumps a gate allows | `CONFIG.gates.baseOps`, the Gate Throughput techs in `js/data/techs.js`, `getSectorGateOps` in `js/core/trade.js` |
+| Change how many routes a trading center can run | `CONFIG.trade.baseRoutes`, the Trade Network techs in `js/data/techs.js`, `getTradeRouteCap` in `js/core/helpers.js` |
+| Change how much INTEL a radar is worth | the Signal Analysis techs in `js/data/techs.js`, `getRadarIntelValue` in `js/core/helpers.js` |
+| Change the tech tab categories, grouping or card layout | `js/data/techs.js`, `js/ui/tech-view.js`, `css/views.css` |
+| Change the building refit button or the fleet drydock | `js/ui/planet-screen.js` (`buildingRefitHTML`, `slotTileHTML`, `drydockSectionHTML`), `css/planet.css` |
+| Change a ship map icon, the mixed-fleet icon or the badge tint | `SHIP_TYPES.<type>.emoji` / `SHIP_FLEET_ICON` in `js/data/ships.js`, `fleetBadge` in `js/ui/map.js`, the `.fleet-badge` rules in `css/views.css` |
+| Change the fleet emblem or roster icon tint | `.fleet-emblem` / `.ship-row-icon` rules in `css/planet.css`, `fleetTabHTML` in `js/ui/planet-screen.js` |
+| Change encounter frequency or open the deck later/earlier | `CONFIG.events` (`openingTurn`, `interval`, `intervalRamp`) in `js/data/config.js` |
+| Make a whole event category rarer or retire it | `EVENT_CATEGORIES[category].weightMult` in `js/data/events.js` |
+| Change one card's odds or unlock turn | the card's `weight` / `minTurn` in `js/data/events.js` |
+| Add or remove cards from a probability bucket | `EVENT_BUCKETS` in `js/data/events.js` |
+| Add survey site types, study time or rewards | `js/data/anomalies.js` |
+| Change how many survey sites a sector gets | `CONFIG.anomalies` in `js/data/config.js` |
+| Change survey discovery, pause or reward rules | `js/core/survey.js` |
+| Add or rebalance spaceports/gates/trading centers | `js/data/structures.js` |
+| Change the trading center cost or upkeep | `STRUCTURE_TYPES.trading` in `js/data/structures.js` |
+| Change trade reach, hop limit or the amount cap | `CONFIG.trade` in `js/data/config.js`, `js/core/trade.js` (`getTradeReach`) |
+| Change how trade transfers resolve or what blocks a route | `js/core/trade.js` (`getSectorTrades`, `resolveTradeTransfers`) |
+| Change the trading center route editor | `js/ui/planet-screen.js` (`tradingCenterHTML`), `css/planet.css` |
+| Change the galaxy trade layer or its panel | `index.html`, `js/ui/galaxy-view.js`, `css/galaxy.css` |
+| Change sector energy/mineral ledgers or upkeep placement | `js/core/economy.js` (`getSectorEconomy`, `getSectorStock`, `spendSectorCost`) |
+| Change the sector ENERGY/MINERALS tiles | `js/ui/map.js`, `index.html`, `css/galaxy.css` |
+| Change the empire sector ledger list | `js/ui/empire-view.js`, `css/views.css` |
+| Change what an event or survey reward credits | `js/core/effects.js` (`applyEffects(effects, sectorId)`) |
+| Change the gate jump energy price | `CONFIG.galaxy.jumpEnergyCost` in `js/data/config.js` |
+| Change the active-research energy upkeep | `CONFIG.research.energyUpkeep` in `js/data/config.js` |
+| Change how distant routes are found | `js/core/hex-grid.js` (`findHexPath`) |
+| Change when ships move or shipyards launch | `js/game/turn.js` (`advanceShipOrders`, `completeShipConstruction`) |
+| Change how sector power is calculated | `js/core/helpers.js` (`getSectorPower`) |
+| Change when a sector's power is published | `js/core/helpers.js` (`isSectorPowerVisible`), `js/ui/galaxy-view.js`, `js/ui/map.js` |
+| Change builder placement or gate travel rules | `js/game/actions.js`, `js/core/helpers.js`, `js/game/planet-nav.js` |
+| Change where construction and colonisation costs are paid | `js/game/actions.js`, `js/core/colony.js` |
+| Change rival count, spawn spread or raid range | `CONFIG.rivals` in `js/data/config.js`, `js/core/empires.js` |
+| Change rival names, archetypes or AI states | `js/data/empires.js` |
+| Change AI weights, growth, raid assembly or lane movement | `js/core/rival-ai.js` |
+| Change patrol radius, repair or salvage | `CONFIG.military` in `js/data/config.js`, `SHIP_TYPES.corvette.patrolRadius` in `js/data/ships.js` |
+| Add or rebalance the radar | `js/data/structures.js` (`radar` cost, build time and upkeep) |
+| Change sector intelligence or raid ETA rules | `js/core/helpers.js` (`getSectorIntelligence`, `forecastRaidEntry`, `getRaidWarningsForSector`) |
+| Change the raid warning badge or INTEL header | `js/ui/map.js`, `index.html`, `css/views.css` |
+| Add or rebalance the stronghold | `js/data/structures.js` (`power`, `attack`, `hull`, `patrolRadius`, `energyUpkeep`) |
+| Change combat targeting, damage, raids or reports | `js/core/combat.js` (including the ranged battle readout and `getBattleInvolvingHex`) |
+| Change battle counts, balance weights or the forecast | `js/core/combat.js` (`getHexBattleReadout`, `getBattleBalance`, `getBattleForecast`); `canFire` decides which units join a volley |
+| Change the war badge, battle sheet or callout | `js/ui/map.js`, `js/ui/battle-view.js`, `js/ui/planet-screen.js`, `css/views.css`, `css/sheets.css`, `css/planet.css` |
+| Change the SET PATROL / STAND DOWN commands | `js/game/military-actions.js` |
+| Change the sector THREAT tile or enemy markers | `js/ui/map.js`, `css/views.css` |
+| Change the sector VIEW layer menu | `index.html`, `js/ui/map.js`, `css/galaxy.css` |
+| Change the galaxy VIEW menu or add another galaxy layer | `index.html`, `js/ui/galaxy-view.js`, `css/galaxy.css` |
+| Change patrol coverage aggregation | `js/core/combat.js` (`getSectorPatrolCoverage`) |
+| Change how sector maps are seeded | `js/core/galaxy.js` (`deriveSectorSeed` / `createSectorSystems`) |
+| Add sector names or planet archetypes | `js/data/systems.js` |
+| Change the galaxy graph look | `css/galaxy.css` and `js/ui/galaxy-view.js` |
+| Change when sector names appear | `js/core/helpers.js` (`isSectorNameKnown`, `sectorHasCharts`, `getSectorLabel`, `sectorHasPlayerPresence`), `js/ui/galaxy-view.js` |
+| Change what a screen may publish about a sector | `js/ui/galaxy-view.js`, `js/ui/map.js`, `js/ui/topbar.js`, `js/ui/planet-screen.js`, `js/ui/sheet-content.js` |
+| Change sector fog / jump rules | `js/core/hex-grid.js` and `js/game/planet-nav.js` |
+| Tune economy, costs and stability | `js/data/config.js` |
+| Change planet size odds, bonus-slot odds or unlock cost | `CONFIG.planetSlots` in `js/data/config.js` |
+| Change starting population, founding shelter or growth rate | `CONFIG.population` in `js/data/config.js` |
+| Change how many minerals buy a house | `CONFIG.population.housing.mineralsPerHouse` in `js/data/config.js` |
+| Change how many people one energy feeds, the 125% ceiling or the sustenance tiers | `CONFIG.population.sustenance` in `js/data/config.js` |
+| Change worker requirements per building | `BUILDINGS.<type>.workers` in `js/data/buildings.js` |
+| Change the house cap, sustenance math, growth or upkeep guards | `js/core/colony.js` (`getWorkforcePlan`, `getSustenanceState`, `getPopulationUpkeepChangeReason`) |
+| Change the population upkeep steppers | `js/game/actions.js` (`adjustPopulationUpkeep`), `js/ui/sheet-content.js` (`populationSheetHTML`) |
+| Change the bonus-slot unlock action | `js/game/actions.js` (`unlockPlanetSlot`) |
+| Change the colony slot tiles or the clickable population card | `js/ui/planet-screen.js`, `css/planet.css` |
+| Change the population menu layout or its meters | `js/ui/sheet-content.js`, `css/sheets.css` |
+| Change the build picker or planet details sheet | `js/ui/sheet-content.js` |
+| Change a screen's markup | `index.html` |
+| Change a screen's look | the matching file in `css/` |
+| Change what a non-map button does | `js/game/` |
+| Change what a save contains or how a snapshot is validated/restored | `js/core/save.js` |
+| Change the browser slot, file download/load or the start-screen CONTINUE card | `js/game/save-actions.js` |
+| Change the save sheet or its actions | `js/ui/sheet-content.js` (`saveSheetHTML`), `js/ui/sheets.js` (`openSaveSheet`), `css/sheets.css` |
+| Change the SAVE chip or the saved-run card look | `index.html`, `js/ui/topbar.js`, `css/topbar.css`, `css/screens.css` |
+| Add a listener or change boot order | `js/main.js` |
+
+## Verification
+
+The randomized ring galaxy was exercised in headless Chrome with scripted runs:
+
+- The default seed generated **37 sectors** in rings **1 / 6 / 8 / 10 / 12**, with **74 lanes**: 36 ring arcs, 36 radial parent lanes and **2 seeded shortcuts**. The graph is connected and symmetric; the base ring sequence has both ring neighbours; every non-core sector has exactly one inward parent; every non-rim parent has at least one outward child.
+- A 24-seed sweep covering first-ring widths **4, 5 and 6** had no topology failures. All 24 seeds produced distinct edge and sector-map signatures. Sector maps are independently seeded; generated sectors hold 4–6 systems, the home holds 5 (fixed capital + 4 seeded), names are unique and all systems are inside the 4 × 6 grid.
+- The graph rendered 37 nodes, four orbit guides, 36 ring arcs, 36 radial lanes and 2 shortcut lanes. All four orbit guides are circles, and every ring's nodes sit at one radius; ring arcs use equal X/Y radii instead of ellipses. The home sector is at the centre; current and charted sectors show names.
+- The 700 × 720 graph sits in a stage that scrolls both axes: at 390 × 844 the stage had a 336 px horizontal and 283 px vertical scroll range. The current sector was centred on both axes at boot; returning from a sector brought the active sector into view on both axes. Scroll-to-current reached an outer-rim sector. A real touch drag on the map changed both `scrollLeft` and `scrollTop` (horizontal, vertical and diagonal drags all panned).
+- The start-screen seed control was exercised: **RANDOM** changed the seed, and typing **424242** started a 29-sector galaxy (rings 1 / 4 / 6 / 8 / 10, 57 lanes: 56 base + 1 shortcut) with a different generation digest from the default seed.
+- The initial run had a 4-ship starting fleet (two Corvettes, a Science Ship and a **Builder**) and an online **Spaceport** in the home capital hex. The sector summary reported starting **POWER 11**, matching the four ships' 4 + 4 + 2 + 1 power values. (At 320 px the six-tile sector summary also fits without overflow.)
+- Queuing a Corvette at the capital cost 4 minerals, left the local fleet at 4 ships and added a **SHIPWAY QUEUE** row reading **READY NEXT TURN**. Ending the turn moved the game to turn 2, launched the Corvette into the capital hex (fleet 5) and emptied the queue. The build option also advertised speed, power and the one-turn delay instead of instant construction.
+- Starting **Efficient Mining** made the research banner and its tech card show **⚡ 1 / TURN**; getEconomy() reported a 1-energy **Research: Efficient Mining** upkeep row, and the topbar net energy included it (2 base energy − 1 colony − 1 research = 0 in the test state).
+- A scripted order from the home hex to a distant corner produced a 3-hex route: the map highlighted all 3 hexes, drew the gold dashed preview and showed the **CONFIRM** button with per-type ETAs. After confirming, both selected ships stayed at the origin until the turn advanced. One movement tick then moved the Corvette 1 hex and the Science Ship 2 hexes along the same path, separating the group as expected. Sector power stayed a correct 15 with the launched Corvette included.
+- A gate in the capital listed Hydra with a **2 ⚡** cost. Jumping with 10 energy left 8, moved the selected ship to Hydra's landing hex for the home lane (4:3) and cleared its queued route. With 1 energy, the jump was refused and no energy was spent.
+- The galaxy node for the home sector rendered a **PWR 11** chip, and the sector summary rendered the **POWER** tile. Screenshots at 390 × 844 confirmed the route preview, ordered-route overlay, shipyard queue, tech upkeep badge and galaxy power chip layouts.
+- Opening a colony from the Empire tab selects its sector; the full turn/event loop still runs.
+
+No console errors were raised during the scripted run. This pass covers ship speeds and power, distant-route previews and per-turn advancement, energy-priced gate jumps, research upkeep and queued ship construction.
+
+### Event pacing and survey pass
+
+A Node harness loaded the classic scripts in a VM and ran **46 logic checks**; a scripted headless-Chrome run at 390 × 844 ran **37 UI checks** with no console errors.
+
+- **Cadence:** the opening card landed on turn 1 and the next was due on turn 4; turns 2 and 3 passed with no card, and the deck drew on turns **4, 7, 10, 13, 16, 19, 22, 25, 28 and 31**. The chip read **EVENTS** between cards, and `state.events.history` matched the cadence.
+- **Categories and buckets:** raising `discovery.weightMult` to 10 moved ~78% of 4,000 draws into discovery; retiring `hazard` with a 0 multiplier produced **zero** hazard cards. Raising one card's weight from 12 to 1,000 took its draw chance from 3.8% to 76.9%. Removing `smugglersOffer` from the contact bucket dropped it from the deck; re-adding restored it. No immediate repeats occurred in 500 weighted draws.
+- **Deck sheet:** the topbar **EVENTS** chip opened a read-only deck sheet with all **8 bucketed cards**, **4 category multipliers**, live percentages, "PLAYED LAST" and "UNLOCKS TURN" notes.
+- **Site generation:** the default seed produced **37 survey sites** in its 37-sector galaxy, always one in the home sector, never on a system, entry hex or landing port, all seeded deterministically from the galaxy seed.
+- **Discovery and study:** charting a site revealed it once, raised the one-time toast and incremented the discovery stat; re-charting did not double-count. A 3-turn Crystal Vein study required a science ship in the hex, completed on turn 7, paid **+6 ⛏ +3 🔬** exactly once and marked the site SURVEYED. Removing the science ship paused the study with its progress intact; returning it resumed the countdown.
+- **UI:** the opening event showed the **🔭 DISCOVERY** category badge; the sector map drew the site ring and DONE marker; the sector summary showed **SITES 1**; the fleet tab carried the survey dossier and a **🔭 SURVEY** ship tag; the galaxy node meta showed **🔭1**; the empty-hex dossier used the site's name and emoji in its hero.
+
+### Military and rival pass
+
+`node tests/military-harness.js` now runs **217 logic checks** against the data, core and turn scripts in a VM. A headless-Chrome pass exercised the same systems through the real DOM at **390 × 844** and **320 × 640**; no console errors were raised.
+
+- **Spawn:** the default seed generated **6 rival empires** covering rings 1–4 (one per ring before extras), with own capitals, no rival on the home sector, **2 / 3 / 4 / 5** opening corvettes by ring and **strongholds in rings 3–4**. Recreating the galaxy from the same seed produced identical names, sectors, capitals and fleet sizes.
+- **Difficulty:** average rival power rose from ring 1 to ring 4; a ring-1 empire runs 2 corvettes with no stronghold, while a ring-4 empire opens with 5 corvettes and a stronghold.
+- **Patrol math:** neighbours are distance 1, radius 1 returns 7 in-sector cells, and radius 2 clips to the 4 × 6 map (16 cells from the test centre). A patrolling corvette and a patrolling rival at distance 1 exchanged 2 damage each per resolution and both died on the third; kills, losses, salvage and dispatches were recorded.
+- **Stronghold:** an online stronghold added exactly **6 PWR** and **2 energy upkeep**, fired at a hostile 2 hexes away, took no return fire from a non-patrolling corvette, and contributed neither power nor upkeep while under construction. The builder flow spent **10 minerals**, placed an under-construction platform, completed it on the next turn, and listed it in the empire's upkeep.
+- **Raid protection:** a colony with a patrolling corvette 1 hex away kept all minerals and stability; removing that patrol let the stationed raider loot minerals and cost 1 stability. The fleet tab showed the patrol as an **R1 ZONE** and the colony hex as covered.
+- **AI growth:** over 24 simulated turns every rival stayed within its fleet, colony and stronghold caps, kept a valid state from the machine, stayed solvent and expanded at least one of its colonies or fleets. The military log stayed within its 16-entry cap.
+- **Cross-lane raids:** a forced `RAID` state ordered a corvette to a home-sector target, moved it across a lane from a neighbouring sector into `Solara Core`, and reached the target sector. Raiders fired on the home garrison, and the military log recorded contact, the repelled raid and the destroyed hull.
+- **UI:** SET PATROL worked through a real DOM click (patrol chip, 7-hex cyan zone, toast), hostile ships rendered as red ⚔ badges, the sector summary showed **THREAT**, a visited ring-3 sector showed a rival node with **⚑ colony** and **⚔ power** meta (the power meta now needs player presence in that sector — see **Sector fog pass**), the rival system dossier used its empire colour and the rival dossier sheet listed state, fleet, reserve and last action. Ten consecutive `endTurn()` resolutions ran the AI, combat, raids and repairs without console errors; the 320 px layout had no horizontal overflow.
+- **Map layers:** `getSectorPatrolCoverage()` counted one patrolling corvette as **7** covered hexes, added an online stronghold as a second source and expanded the union to **15**; an under-construction stronghold contributed nothing. In the browser the **VIEW** button opened the popup, the patrol switch removed the zones and legend, outside click and **Escape** closed the menu, and the popup stayed inside the 320 px viewport with no page overflow.
+- **Battle readout:** a charted hex with **3 player ships vs 2 rival ships** produced the correct ship counts, **4 ATK** per side, current hull (**13** vs **6**), a balance share adding to 100% and a labelled leader. The concentrated-fire projection destroyed the damaged enemy corvette and the player science ship, left **2 enemy hull** and **9 player hull**, and named the exchange winner without changing either fleet's hull. Adding a hostile stronghold raised the enemy volley to **7 ATK** and tagged it **STATIC**; removing the rival fleet returned `null`.
+- **Battle UI:** the sector map drew the pulsing **⚔** badge and orange dashed border for both an empty-space 3-vs-2 battle and a 4-vs-1 battle over the home colony, while keeping the two fleet-count badges. Clicking the war icon opened the **Battle** sheet with both fleet cards, **5** unit rows, a **54 / 46** balance bar and the next-turn loss/remaining-hull forecast. The fleet tab showed a **BATTLE IN PROGRESS** callout, its **FORECAST** button reopened the sheet, and **OPEN HEX FLEET** returned to the fleet manifest. At 320 px the sheet, callout and map stayed at **320 px** with no horizontal overflow or console errors.
+
+### UI polish pass
+
+The colony dossier keeps ship construction behind the spaceport card, the two static map note boxes are gone, and both maps now use the reclaimed space.
+
+- **Spaceport card:** opening a colony shows the online spaceport as a clickable card (`aria-expanded="false"`, tag **SHIPYARD**). Tapping it reveals the three ship types and the keel queue; building a Corvette spent 4 minerals, added a queue row and kept the menu open. The card's status line reports the queue when collapsed (`1 KEEL · READY NEXT TURN`); closing hid the build list and queue, and reopening the planet started collapsed again.
+- **Map cleanup:** the **Free actions** sector note and the **Galaxy map** note were removed from the markup, along with their DOM caches and update code. The galaxy graph now sits directly below its legend, and the sector summary directly below the sector legend. The orphaned `getMilitaryReportLine()` helper was removed with the sector note.
+- **Larger maps:** both stages are full-bleed inside the app column. The sector viewBox grew from **390 × 262** to **392 × 279** with larger hexes (34.5 vs 32) and tighter framing; the galaxy stage grew from 52dvh to **58dvh** (max 540 px), with a 50dvh short-screen fallback. At 390 px the sector stage measured **390 × 278** and the galaxy stage **390 × 490**; at 320 px they measured **320 × 228** and **320 × 320**, with no horizontal overflow.
+- **Verification:** browser checks at 390 × 844 and 320 × 640 raised no console errors.
+
+### Population and colony pass
+
+> Historical pass: the Residential Block and block-based housing described here were removed by the **Population upkeep pass** at the end of this file. Planet size, bonus slots and workforce rules still apply.
+
+`node tests/colony-harness.js` runs **113 logic checks** against planet size, bonus slots, housing, growth, workforce, upkeep and fractional income. The existing `node tests/military-harness.js` still runs its **183 checks**. A headless-Chrome script at **390 × 844** exercised the real colony DOM and a full turn with no console errors.
+
+- **Size and bonus rolls:** 20,000 seeded rolls landed at **about 25% small / 50% medium / 25% large**; bonus rolls were **about 85% / 10% / 5%** for 0 / 1 / 2 slots and never exceeded 2. Every generated system received a size and 0–2 bonus slots, including the capital, and recreating the galaxy from the same seed produced the same profiles.
+- **Slots:** a medium planet had **4 standard + 2 locked** slots. The first unlock cost **5 ⚡ + 8 ⛏** and opened slot 5; the second opened slot 6. The second locked tile stayed disabled and read **OPEN THE EARLIER BONUS SLOT FIRST** until the first was opened. A large planet correctly showed **6 standard + 2 locked = 8** tiles with 6 open.
+- **Workforce and upkeep:** with 1 population and a Mine + Power Plant + Lab + Residential Block, the Mine was **1/2 workers = 50% output**, the Power Plant and Lab were **IDLE · 0/1 WORKERS**, and both their upkeeps were still charged. Setting population to 3 staffed the Mine **2/2** and the Power Plant **1/1**, left the Lab idle, and removed the partial state.
+- **Growth:** a 1-population colony with 3 housing grew **+1.0** then **+0.5** per turn; the capital with 5 housing grew **+0.6** at 3 population and **+0.3** at 4. Two +0.6 ticks banked a 0.2 carry and completed the next population instead of rounding it away. Population stopped at the housing cap.
+- **Full turn:** ending the turn moved the colony from 1 to 2 population, kept every stockpile whole, paid the **2 energy** upkeep (colony + Mine) and produced **5 minerals** (2 base + a now fully staffed Mine). The information panel and topbar updated with no errors.
+- **UI:** the colony dossier showed the size chip, **4 / 4 USED · 2 LOCKED**, the population card (**5 housing**, 1 block, **+1.2 / TURN**, 2 idle, 1 partial), the **50% OUTPUT** mine tile, the idle upkeep note and the locked bonus tiles. Tapping a locked tile deducted its cost and replaced it with an empty build slot. The build sheet stayed available with **no free workers**, showed the worker requirement and **NEEDS 1 MORE** affordability state, and building after unlocking spent the minerals and rendered an **UNDER CONSTRUCTION** tile.
+
+### Sector economy and trade pass
+
+`node tests/economy-harness.js` runs **125 logic checks** covering sector ledgers, local costs, gate reach, trade transfers, upkeep, per-sector deficits and the full turn pipeline. The updated `node tests/colony-harness.js` runs **116 checks** and `node tests/military-harness.js` runs **183 checks**. A scripted headless-Chrome pass at **390 × 844** and **320 × 640** exercised the real build, trade and galaxy-view DOM with no console errors.
+
+- **Starting ledger:** the home sector opened with **10 ⚡ / 10 ⛏** while every other sector held **0 / 0**; `state.resources` contained only **research** and **influence**. The topbar read the active sector's stock and deltas, and the new **ENERGY** / **MINERALS** tiles in the sector summary showed `10 +1` and `10 +2.2` (militarist doctrine) on the home sector.
+- **Local economies:** in the three-sector harness the capital earned **6 ⚡ / 5 ⛏** with **3** upkeep and a **+3** energy net, a frontier mine sector earned **3 ⛏** against **3** upkeep (net **−3 ⚡**), and a lab sector contributed **2 🔬** while still paying its own **2 ⚡** upkeep. The empire summed to **6 ⚡ / 8 ⛏ / 2 🔬** and **−2** net energy, and draining one sector's minerals left the other two untouched.
+- **Local costs:** building a Mine spent the colony sector's minerals (20 → 15) without touching a neighbouring sector; a Corvette and a gate jump also charged the acting sector; a jump burned the origin sector's **2 ⚡**; colonisation was refused with **0 ⛏** in the target sector, then succeeded after moving **10 ⛏** there and spent the empire's **3 🏛** influence.
+- **Gate trade:** a trading center with no gate reported **NO GATE**; adding one operational gate opened **6** direct destinations (all ring-one neighbours). A two-hop sector stayed out of reach until a **relay gate** was built in the first sector, then appeared at **2 hops**; an unreachable target was refused and not saved. Amounts clamped at **20** per resource, a route with no amount read **AWAITING AMOUNT**, and an online center added exactly **1 ⚡** upkeep.
+- **Transfers:** a route set to **20 ⚡ / 4 ⛏** with **7 ⚡ / 2 ⛏** in the source shipped **7 / 2**, marked the center's last shipment as **short**, and left the target with **7 / 2**; a second resolution shipped nothing and still took no research or influence. In the full turn pipeline the capital paid its upkeep (including the center), earned its income and shipped **2 ⚡ / 3 ⛏**, while a third sector paid only its own upkeep and a second sector finished with the shipment; research (**2 🔬**) and influence (**+1 🏛**) landed in the shared stockpile.
+- **Builder and dossier UI:** the builder build list included **Trading Center** at **8 ⛏**; building it through the real button spent the home sector's minerals (40 → 32), showed **UNDER CONSTRUCTION**, came online on turn 2 and drew **1 ⚡** upkeep. The dossier listed **Hydra · RING 1 · 1 hop** and the other five sectors in reach; a route of **⚡2 ⛏1** read **SHIPPING**, and the next turn delivered **2 / 1** to Hydra (home energy **31 → 29**, target **0 → 2**). The sector map labelled the new structures **TRADE HUB** and **GATE**.
+- **Galaxy trade view:** the galaxy **VIEW** menu showed a **Trade view** switch, and the layer drew **1** route line with a **⚡3 ⛏2** label, **1** 🏪 trading node and a panel row reading **1 ACTIVE · ⚡3 ⛏2 / TURN** (the builder pass ended at **⚡2 ⛏1**). The legend gained **TRADE ROUTE**, the panel row opened the source sector, and **Escape** closed the layer menu. The empire tab listed both sector ledgers with their in/out trade. At **320 px** the document, topbar, panel and both maps stayed at **320 px** with no horizontal overflow.
+
+### Sector name pass
+
+`node tests/name-harness.js` runs the name and power fog checks: the home source, the one-lane halo from charted sectors, player colonies, surface buildings and orbital structures, the promise that a name-only sector never names another lane, the exclusion of rival presence, the sector-power gate, and the trade-destination guarantee. The harness re-runs alongside the others: **116** colony, **183** military and **125** economy checks at the time of this pass. A headless-Chrome pass at **390 × 844** and **320 × 640** ran **20 DOM conditions** at each size with no console errors. (The **Sector fog pass** below updates the name harness to **61** logic checks and adds a **74**-check UI harness.)
+
+- **Home halo:** the home capital's colony and spaceport named every ring-one neighbour on the galaxy map even after the active sector was moved to the rim. Sectors beyond the halo stayed `?` with no label.
+- **Chart halo:** charting a distant sector with one ship named that sector and all of its immediate neighbours; sectors two lanes away stayed unnamed. Simply viewing a named-but-uncharted sector did **not** name another lane.
+- **Presence:** a player gate in a remote ring-three sector named that sector and its immediate neighbours. A name-only neighbour rendered as `R3 · UNCHARTED` with no colony, fleet or site counts, and a sector two lanes away stayed hidden.
+- **Ignored presence:** a rival colony plus a rival stronghold did not publish a name or count as player presence. A lone player corvette did chart its hex, so it published that sector's name, while it still counted as neither a colony nor a building.
+- **Name vs chart:** every node's `.node-name` matched `isSectorNameKnown()` at each stage, and an unknown node's ARIA label read `Unknown sector, RING 2 sector, uncharted, 0 of 24 hexes charted` without leaking its name.
+- **Trade:** every destination returned by `getTradeReach()` was a named sector. The source gate alone left a two-hop target unnamed; adding the relay gate named it, so the same presence rule that feeds the map also covers the trade editor.
+- **Layout:** at **390 px** and **320 px** the document stayed at the viewport width with no horizontal overflow.
+
+No console errors were raised during the browser pass.
+
+### Fleet icon pass
+
+`node tests/military-harness.js` now runs **183 logic checks**; **11** of them cover the fleet icon rules. The colony, economy and name harnesses still pass at **116**, **125** and **37**. A headless-Chrome DOM pass and a Chrome DevTools Protocol viewport pass rendered the map and the fleet tab at **320 × 640** and **390 × 844**, ran **16 DOM conditions** and raised no console errors.
+
+- **Same-type badges:** a hex holding one corvette, one science ship or one builder rendered `fleet-corvette` / `fleet-science` / `fleet-builder` with **🚀 1**, **🛰️ 1** and **🏗️ 1**. Two corvettes stayed `fleet-corvette` with **🚀 2**, and a ten-corvette fleet widened the capsule to **26.1** map units while keeping **🚀 10**.
+- **Mixed badges:** a science + builder hex and the mixed capital fleet rendered `fleet-mixed` with **🛸** and their counts, while same-type stacks never fell back.
+- **ARIA labels:** the hex label now reads *fleet of 4 ships (2 corvettes, 1 science ship, 1 builder)*; a lone ship reads *fleet of 1 ship (1 corvette)*.
+- **Fleet tab:** the summary emblem used the same icon (**🛸** for the mixed capital fleet, **🚀** for a corvette-only fleet) and carried the `fleet-emblem-*` tint. Every roster row carried its `ship-icon-corvette` / `-science` / `-builder` frame tint.
+- **Live turn:** ending a turn with a corvette ordered onto a science ship's hex moved the corvette, rebuilt the hex as `fleet-mixed` with **🛸 2**, updated the composition label and returned the game to the actions phase without errors.
+- **Layout:** at **320 px** and **390 px** the document's `scrollWidth` matched its `clientWidth`; the sector map measured **318 / 388 px** and the fleet tab **320 / 390 px**. The wider capsules caused no horizontal overflow.
+
+### Ranged defence battle pass
+
+`node tests/military-harness.js` now runs **183 logic checks**; **51** of them cover ranged engagements. The colony, economy and name harnesses still pass at **116**, **125** and **37**. A headless-Chrome pass at **320 × 640** and **390 × 844** exercised the map badge, both fleet-tab callouts and the battle sheet with no console errors or horizontal overflow.
+
+- **Patrol defence:** a patrol one hex from a hostile corvette produced a readout with the patrol tagged **RANGED**, the corvette tagged **NO RANGE**, a **2 ATK** player volley and a **0 ATK** enemy volley. The balance read **PLAYER ADVANTAGE 90% / 10%**; the forecast left the patrol at 5 hull and the corvette at 3. Resolving the combat step landed the 2 damage, left the patrol untouched and updated the next forecast to a rival hull of 1.
+- **Stronghold defence:** an online stronghold two hexes from a hostile corvette joined as a static ranged defender with **3 ATK**, a **0 ATK** enemy volley and a **96% / 4%** balance. The fleet card read **YOUR DEFENCE**, the unit tag **STATIC**, and the stats showed **R2** and **+2 HEX**.
+- **Reverse fire:** a rival stronghold firing at a player corvette produced an **ENEMY ADVANTAGE 4% / 96%** balance, a **0 ATK** player volley and the corvette tagged **TARGETED**. The hero copy read *Your units cannot return fire.*
+- **No false battles:** two civilian science ships in adjacent hexes produced no readout. An uncharted hostile hex did not leak a callout into the defended hex; charting it made `getBattleInvolvingHex()` return the engagement with the hostile anchor.
+- **UI:** the hostile hex carried the **⚔** badge and the `has-battle` class; both the hostile and defended fleet tabs showed a violet **RANGED DEFENCE** callout (with **HEX 1:1** on the defended side) whose **FORECAST** button opened the same sheet. The sheet read **RANGED ENGAGEMENT**, tagged the patrol **RANGED** with **+1 HEX** and the corvette **NO RANGE**, and showed **YOUR VOLLEY 2 ATK** / **ENEMY VOLLEY 0 ATK · NO OFFENSIVE FIRE**.
+- **Layout:** at **320 px** and **390 px** the document and the sheet stayed within the viewport (`scrollWidth` matched `clientWidth`, and the sheet body did not overflow horizontally). The callout measured **296 px** / **366 px** inside its column.
+
+### MVP 3.0 polish pass
+
+The four Node harnesses still pass at **116** colony, **127** economy, **37** name and **217** military checks. Headless-Chrome passes at **390 × 844** and **320 × 640** exercised the start screen, the sector map, the layer menu and the topbar, then ran **30 consecutive turns** with no console errors or horizontal overflow.
+
+- **Encounter schedule removed:** the top-right chip now reads **EVENTS** and opens the encounter deck. It no longer exposes the next encounter turn, and the deck sheet no longer lists one.
+- **Raid alert (later superseded):** this pass made the chip beside stability read **N RAIDER** / **N RAIDERS** when rival raiders were crossing lanes, with an accessible explanation and a link to the **Empire** tab. The radar/intelligence pass below removes that count; the chip now reads only **PWR n** for hostile power in the current sector.
+- **Swarm crisis removed:** the crisis clock, countdown state, topbar crisis chip, end-screen branch, stability-sheet rows and `CONFIG.crisis` are gone. Runs no longer end on a fixed turn count; stability and the Ascension project remain the win/lose paths. **Planetary Defense** is now the military side of its A/B tech choice and gives every online player stronghold **+1 attack**.
+- **Charted-space layer:** the sector **VIEW** menu gained a **Charted space** switch. It washes every charted hex in blue, dims the remaining fog, hides itself when off, reports the live **n / 24** count and adds a matching legend entry while active. It is off by default so the existing tactical read is unchanged.
+- **Patrol layer unified:** patrolling corvettes and online strongholds now draw the same cyan dashed coverage. The `stronghold`/`corvette` distinction remains in the coverage data and menu summary, but not in the map colour.
+
+### Lane landing pass
+
+The military harness runs **217** checks and the economy harness **127**. Headless-Chrome passes at **390 × 844** and **320 × 640** raised no console errors and no horizontal overflow.
+
+- **Port assignment:** every sector owns one perimeter landing hex per adjacent sector. The assignment reads the neighbour's bearing in the galaxy view and mirrors the return lane through the sector centre: the northern neighbour takes the top row when it is the closest free port, the southern neighbour the bottom row, and each port has an opposite partner in the other sector. A small backtracking pass keeps every port in a sector unique and assigns the closest available bearing.
+- **Reserved ground:** landing ports are never chosen for systems or survey sites, so a lane threshold stays clear. The central entry hex remains the home capital and the fallback for incomplete state.
+- **Map labels:** each port is drawn as a dashed gold hex with a compact tag naming the inbound sector and an arrow pointing back along the lane toward that sector. **VIEW → Landing hexes** toggles the labels; it is on by default, reports the live port count and adds a **LANDING** legend entry while active.
+- **Travel:** player gate jumps and rival lane jumps both depart from the lane's local port and arrive on its mirror in the destination sector. The arrival hex is charted and selected, and the fleet tab's **GATE JUMP** rows show the destination as **LANDS row:col**.
+
+### Radar and raid intelligence pass
+
+`node tests/military-harness.js` now runs **217** checks; **25** of them cover radar construction, online-only stacking, base intelligence, raid ETA forecasts and the turn-by-turn countdown. The colony, economy and name harnesses still pass at **116**, **127** and **37**. A headless-Chrome pass at **390 × 844** and **320 × 640** verified the live **INTEL** header, the red **3T** warning, the warning's independence from the landing layer and the **Radar** build button, with no console errors or horizontal overflow.
+
+- **INTEL stat:** every sector starts at **1**. One online radar raised it to **2** and a second to **3**; a radar still under construction added nothing. The value is shown in the sector header above the charted count.
+- **Forecast:** a raider two lane-moves plus one jump from entering Solara Core was hidden at INTEL 1 and 2, then produced one warning at INTEL 3 with **3T** on the correct mirrored landing hex. The warning counts end-turns until the hull jumps into the sector, not hexes or lane hops. Advancing turns reduced the badge through **2T** and **1T**, and the warning cleared on the jump that entered the sector.
+- **Removed count:** the topbar no longer renders **N RAIDER / N RAIDERS**; its threat chip is now only **PWR n** for hostile power in the viewed sector. The Empire military footer likewise drops the **RAIDERS INBOUND** line and keeps only **N RAID(S) ACTIVE** when a raid group still exists.
+- **Map read:** detected entry hexes get a red dashed threshold, a red-tinted tile and a small **nT** badge above the gold landing label. The warning stays visible when **VIEW → Landing hexes** is switched off, so hiding labels cannot hide an incoming raid.
+- **Builder:** the builder list gained **Radar** at **5 ⛏**, one-turn construction and **1 ⚡** upkeep. It occupies one empty hex like other orbital structures, and the dossier explains the sector's live INTEL and forecast window.
+
+### Sector fog pass
+
+This pass closes the leaks that let an unexplored sector publish its own name, a rival's power or the names of its neighbours. `node tests/fog-harness.js` is a new Node VM harness that loads the renderers behind element stubs and runs **74 UI checks**; `node tests/name-harness.js` grew to **61 logic checks**. The colony, economy and military harnesses still pass at **116**, **127** and **217**. A headless-Chrome pass at **390 × 844** and **320 × 640** drove the real DOM — it measured the galaxy nodes, dispatched real clicks and charted sectors — with no console errors or exceptions, no horizontal overflow (`scrollWidth` matched `clientWidth` in the galaxy, fogged and charted views) and no frame over **17 ms** across 25 `renderAll()` calls. Twelve consecutive turns ran through the real turn pipeline without errors.
+
+- **Unnamed node:** the far sector `Cygnus` rendered no `.node-name`, no `.node-meta` and no `.node-power`, and its name appeared nowhere in the galaxy SVG. The named-node count matched `isSectorNameKnown()` exactly (**7** of **37**), and the home node kept its **PWR 11** chip.
+- **Click refusal:** dispatching a click on the unnamed node left `state.ui.activeSector` on `sec-core`, kept `mapMode` on `galaxy`, raised the toast **No charts for that sector yet. Send a ship to chart it.** and left the sector title unchanged.
+- **Named but uncharted:** clicking `Hydra` (a ring-one neighbour) opened its page with the right title, **0 / 24 CHARTED**, **—** for COLONIES, SITES, FLEETS, POWER, THREAT, ENERGY, MINERALS and INTEL, the badge copy *No charts in this sector yet…* and **0** landing markers. None of its neighbours' names appeared in the sector SVG. Viewing it did not name its ring-two neighbours either.
+- **Charted sector:** the home sector kept its real summary (**POWER 11**, THREAT 0, 1/24 charted) and drew all **6** named lane ports. Charting a far sector kept both power tiles at **—**; adding one corvette published **POWER 4**, the live **THREAT** readout and a **PWR 4** chip on the galaxy node, and they all disappeared when it left.
+- **Threat chip:** the named-but-uncharted rival sector `sec-r1-4` (hostile power **8**) hid the topbar chip, its **THREAT** tile and its **⚔8** node meta, even while the sector was being viewed. Charting it changed nothing: the chip, tile and node number stayed hidden because the player had no presence there (the node kept its rival **⚑** flag from the chart). One corvette in the sector then published **PWR 8** in the topbar, **8** in the **THREAT** tile, **4** in the **POWER** tile and **⚔8** on the node, and removing it hid all of them again.
+- **Jump rows and trade:** the fleet tab's GATE JUMP list marked an uncharted destination **UNCHARTED** and omitted its **⚔** power; charting it still omitted the number, and a player ship at the destination finally added **⚔8**. Trade-editor destinations only print a colony count once the destination is charted.
+- **Dispatches:** a met rival whose home sector was uncharted read *…in an uncharted sector* instead of the sector's name; charting the home sector restored the name.
+- **No regressions:** a real gate jump still moved a corvette, charged **2 ⚡**, switched to the destination, titled it, and showed **POWER 4**, **1/24 CHARTED** and **4** landing lanes.
+
+### Population upkeep pass
+
+The Residential Block is gone. Population now grows from two standing upkeep bills managed in a dedicated population menu: **housing** is bought with minerals and is the hard cap, **sustenance** is bought with energy and sets the growth multiplier. `node tests/colony-harness.js` grew to **203 logic checks**, `node tests/economy-harness.js` to **128**, and the new `node tests/population-harness.js` runs **88 UI checks** against the card, menu, steppers and economy sheets. The fog, military and name harnesses still pass at **74**, **217** and **61**. A headless-Chrome pass at **390 × 844** and **320 × 640** drove the real colony and menu DOM with no console errors, no horizontal overflow and no exception, including a **15-turn** stress run at 390 × 844 with the capital's upkeep pinned to its maximum.
+
+- **Residential Block removed:** `BUILDINGS.residential` and its build-order entry are gone; the build picker offers Mine, Power Plant, Lab and Embassy only, no screen mentions Residential Blocks, and the `slot-tile.housing` rule was removed. A completed building still pays upkeep whether or not workers staff it.
+- **Card:** the colony's **POPULATION** card is now a real `<button>` with `aria-haspopup="dialog"`, the population/houses value, a fill track, the job count and the **HOUSING** and **SUSTENANCE** stats. Tapping it opens the **Population** menu; the card's note explains a full house cap, a missing sustenance bill or the next population's ETA.
+- **Menu:** the sheet shows the current population and houses, a housing stepper in **minerals** (one press = +1 house) and a sustenance stepper in **energy** (one press = +1 energy), a sustenance meter and tier badge, the supply/demand split, a growth forecast and next-population ETA, the workforce rows, and an **UPKEEP · PAID BY <sector>** section with the two costs and the sector's net after upkeep.
+- **Geometry:** a small planet pays for **3** extra houses (**6 ⛏**), a medium **4** (**8 ⛏**) and a large **6** (**12 ⛏**); each is added to the founding shelter (capital **3**, colony **1**). The housing stepper disables at that bound, and a cut that would leave more people than houses is refused with **Housing can't fall below the current population.** in the button title and a toast.
+- **Sustenance math:** 1 ⚡ feeds **2** population. Below 100% the multiplier falls proportionally (`2 of 3 fed = 67% · FRUGAL`); a surplus caps at **125% · THRIVING**. The five tiers are **STARVING / MALNOURISHED / FRUGAL / CONTENT / THRIVING**. The sustenance stepper caps at the upkeep needed to keep a maximum-population planet thriving (**5** energy for the capital).
+- **Growth:** at **3 / 4** houses with **2 ⚡** sustenance the capital gained **+0.47/turn** and banked **47%** after one end-turn; the third tick completed the population. A new **1 / 1** colony with one paid house and two energy reached **2 / 2** after two turns. With no sustenance upkeep the plan reported **growth 0 / turn** and **NO SUSTENANCE** even with empty houses.
+- **Economy:** the sector ledger charges the housing minerals and the sustenance energy before income. With the capital at 2 ⛏ housing and 2 ⚡ sustenance, the topbar showed **⚡ −1** and **⛏ +0.2** net, the mineral sheet gained a **SECTOR UPKEEP** section listing **Population housing**, the energy sheet listed **Population sustenance**, and the stability sheet renamed its row to **Negative sector balance after upkeep**. An unpaid housing bill ran a mineral deficit and was flagged by `getSectorsInDeficit()`.
+- **Layout:** at **390 px** the card measured **366 px** wide and the menu sheet **390 px**; at **320 px** the card measured **296 px**, the sheet **320 px** and the upkeep row **288 px**. `scrollWidth` matched `clientWidth` in both sizes, and the sheet body scrolled vertically with no horizontal overflow. Screenshots at both sizes showed the housing and sustenance sections above the fold.
+
+### Technology tree pass
+
+The research catalogue grew from six techs to **46** and split into three categories. Two new rules drive the pass: a completed tech never upgrades a standing asset, and every unlock has a paid order the player must give. `node tests/tech-harness.js` is a new Node VM harness with **206 checks** covering the catalogue, building levels and refits, ship refits and repairs, the stronghold, radar, gate and trade lines, tech gating, and the HTML the tech tab, colony slot, drydock and trade editor actually build. The colony (**203**), economy (**128**), fog (**74**), military (**217**), name (**61**) and population (**88**) harnesses still pass unchanged. A headless-Chrome pass at **430 × 1500** rendered the three tech categories, the capital colony with its refit button, the fleet drydock, a two-route trading center and a gate hex with the jump-op counter, with no console errors.
+
+- **Catalogue:** **12** building techs (three per building), **23** military techs (six per hull — power, hull and speed at two levels each — plus five stronghold techs) and **10** trade & exploration techs (2 radar, 3 gate, 3 trading center, 2 doctrine). Nothing is pinned below the three tabs: the former final-project section is gone, while `TECHS.ascension` and its `endGame("ascension")` branch stay in the data for the win condition. Every tech id appears once in `TECH_ORDER` and every prerequisite appears before the tech that needs it.
+- **Building levels:** a Mine reads **3 / 4 / 5 / 6 ⛏**, a Power Plant **4 / 5 / 6 / 7 ⚡**, a Lab **2 / 3 / 4 / 5 🔬** and an Embassy **2 / 3 / 4 / 5 🏛**. Completing *Deep Core Drilling I* unlocked level 2 but left the standing mine at **3 ⛏**; the slot's **REFIT · L2 · 3 ⛏** button then charged 3 minerals (half the 5 mineral build cost) and the same mine produced **4 ⛏**. A second press was refused while level 3 was still locked, and an empty ledger disabled the button instead of hiding it. A mine laid down *after* the tech opened straight at the unlocked level (**LVL 4** once all three mining techs were complete), so the refit is a retrofit for older buildings rather than a tax on new ones.
+- **Ship refits:** a corvette kept **4 ✦ PWR / 5 🛡 / 1 ➜** after *Corvette Weapon Lattice I*; the refit was refused with no spaceport in the sector and applied for 1 mineral once one was built, raising the hull to **6 ✦ PWR**. Hull refits raised both the maximum and the current hull (5 → 7), speed refits changed the movement ETA (4 hexes at speed 2 = 2 turns) and a second corvette stayed at base stats until it was refitted too. A corvette laid down at the spaceport after the same techs launched already refitted (**9 ✦ PWR**) at full hull.
+- **Repair:** the DRYDOCK's REPAIR button is offered only while an operational spaceport stands in the ship's sector. It restores the full hull for `ceil(missing × 0.5)` minerals (minimum 1) and is refused on an undamaged hull.
+- **Strongholds:** the five techs took a stronghold from **3 ⚔ / 10 🛡 / R2** to **5 ⚔ / 18 🛡 / R3**, and a platform built after the hull techs launched at the raised maximum. Rival strongholds kept the base values throughout.
+- **Radar, gates and trade:** *Signal Analysis I / II* took one radar from **+1** to **+3** INTEL (**4** with one radar, **7** with two). *Gate Throughput I / II / III* set the per-gate rate to **2 / 3 / 4** ops, a spent gate refused the next jump without charging energy, and the counter refreshed on the next turn. *Trade Network I / II / III* gave a center **2 / 3 / 4** route slots; two configured routes shipped **2 ⚡** and **3 ⚡** in the same turn, drew from the same sector ledger, and clearing one left the other alone. `structure.trade` stayed aliased to route 0.
+
+### Save system pass
+
+A run is now saved and loaded client-side, with no backend. `node tests/save-harness.js` is a new Node VM harness with **57 checks**: it round-trips every game field through JSON, checks both RNG stream positions, proves a restored deck draws the same next card, validates bad files and versions, restores an event-phase card, resets transient UI, and runs a full `endTurn()` on both the original and a restored run to prove the resulting state is identical. The existing harnesses still pass: **203** colony, **128** economy, **74** fog, **217** military, **61** name, **88** population and **211** tech.
+
+A scripted headless-Chrome pass at **390 × 844** and **320 × 640** ran **65 UI checks** with no console errors or exceptions: it saved to browser storage, changed the run, loaded the save back, reloaded the page and used **CONTINUE**, moved the save into a downloaded **215,686-byte** JSON file, started a fresh Pacifist run and loaded that file over it, deleted the browser slot, and measured the SAVE chip, archive and start screen for horizontal overflow at both widths. The archive offers five actions (browser save/load/delete and file download/upload), the topbar chip collapses to its icon at 320 px, and the start screen shows **CONTINUE · TURN 3 · MILITARIST · JUST NOW**.
+
+- **Snapshot:** the browser slot held the turn, galaxy seed, both RNG positions and the full state; the save file parsed back with `format: "stellar-dominion-save"`, `version: 1` and named itself `stellar-dominion-2026-11-17-turn-3-seed-20261112.json`.
+- **Round trip:** loading put the run back on turn 3 with the same stability, research/influence, population, fractional growth, sector ledgers and RNG positions; the start screen's CONTINUE card survived a full page reload.
+- **Continuation:** the harness played turn 4 on both the original and the restored state and compared the whole galaxy, systems, empires, resources, military log, tech and event state. The fingerprints matched exactly, including the next encounter card.
+- **Failure path:** non-JSON text, a foreign format, version 99, a save with no galaxy and an ended run were all refused with a readable error; an ended run is also refused at save time.
+
+

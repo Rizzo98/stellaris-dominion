@@ -1,0 +1,35 @@
+/* ============================================================
+   TOAST + misc
+   ============================================================ */
+#toast{
+  position:fixed;left:50%;bottom:calc(79px + env(safe-area-inset-bottom));
+  z-index:130;transform:translate(-50%,9px);
+  max-width:calc(100% - 32px);
+  border:1px solid rgba(103,232,213,.28);border-radius:8px;
+  padding:7px 10px;
+  background:rgba(11,25,33,.96);
+  color:var(--text);font-family:var(--mono);font-size:8px;line-height:1.45;letter-spacing:.02em;
+  opacity:0;pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease;
+  box-shadow:0 8px 25px rgba(0,0,0,.35);
+}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:350px){
+  #topbar{padding-left:7px;padding-right:7px}
+  #topbar .resources{gap:3px}
+  .res-chip{padding-left:5px;padding-right:5px}
+  .res-chip .res-name{font-size:6px}
+  .view{padding-left:9px;padding-right:9px}
+  .map-stage,.galaxy-stage{margin-left:-9px;margin-right:-9px;width:calc(100% + 18px)}
+  .sector-stats{gap:4px}
+  .sector-stat{padding:6px 5px}
+  .sector-stat > span{font-size:5.7px;letter-spacing:.02em}
+  .sector-stat b{font-size:11px}
+  #start-screen{padding-left:13px;padding-right:13px}
+  .event-card{padding-left:15px;padding-right:15px}
+  .event-card h2{font-size:23px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+}
