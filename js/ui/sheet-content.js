@@ -2,8 +2,57 @@
    SHEET CONTENT — HTML bodies for the bottom sheet
    Resource details, stability, building picker, the population menu (energy
    maintenance and housing investment steppers), planet details, the event
-   deck and the rival dossier.
+   deck, the quick-move ship picker and the rival dossier.
    ============================================================ */
+
+/* Quick-move picker: the ships stationed in the hex the player held. Each row
+   is a one-tap action, so there is no selection state in here — the row hands
+   its ship to the map, which then takes the destination. */
+function quickMoveSheetHTML(ships) {
+  const fleet = ships || [];
+  const rows = fleet.map(function (ship) {
+    const type = SHIP_TYPES[ship.type];
+    if (!type) return "";
+    const hull = getShipHull(ship);
+    const hullMax = getShipHullMax(ship);
+    const damaged = hull < hullMax;
+    const hasOrder = !!(ship.path && ship.path.length && ship.pathSectorId === state.ui.activeSector);
+    const destination = hasOrder ? parseHexKey(ship.path[ship.path.length - 1]) : null;
+    const orderChip = hasOrder
+      ? '<span class="ship-order-chip">→ ' + (destination.row + 1) + ":" + (destination.col + 1) +
+        " · " + ship.path.length + (ship.path.length === 1 ? " HEX" : " HEXES") +
+        " · ETA " + getPathEta(ship.path.length, ship.type) + "T</span>"
+      : "";
+    const patrolChip = ship.patrol
+      ? '<span class="ship-order-chip patrol-chip">🛡 PATROL R' + shipPatrolRadius(ship) + "</span>"
+      : "";
+    return (
+      '<button class="ship-row quick-move-row" type="button" data-quick-move-ship="' + ship.id + '"' +
+        ' aria-label="Move ' + ship.name + ' to a destination hex">' +
+        '<span class="ship-row-icon ship-icon-' + ship.type + '" aria-hidden="true">' + type.emoji + "</span>" +
+        '<span class="ship-row-main">' +
+          '<span class="ship-row-name">' + ship.name + "</span>" +
+          '<span class="ship-row-meta">' + type.name + " · " + type.role + "</span>" +
+          '<span class="ship-row-stats">' +
+            '<span class="ship-stat' + (damaged ? " damaged" : "") + '">🛡 <b>' + hull + "</b>/" + hullMax + " HULL</span>" +
+            '<span class="ship-stat speed">➜ <b>' + getShipSpeed(ship) + "</b> SPD</span>" +
+          "</span>" +
+          orderChip +
+          patrolChip +
+        "</span>" +
+        '<span class="quick-move-arrow" aria-hidden="true">➜</span>' +
+      "</button>"
+    );
+  }).join("");
+
+  return (
+    '<p class="sheet-scope"><b>' + fleet.length + "</b> " +
+      (fleet.length === 1 ? "ship" : "ships") +
+      " stationed here. Tap one to pick its destination on the map.</p>" +
+    '<div class="ship-list quick-move-list">' + rows + "</div>" +
+    '<p class="sheet-note">The route is previewed on the map before it is ordered. A ship that is already moving keeps its hex until the turn ends; confirming a new route replaces the old one, and any patrol stance on the moving ship stands down.</p>'
+  );
+}
 
 /* Encounter deck inspector. Read-only: it shows the live cadence, category
    multipliers and the weighted chance of every card in its bucket. */

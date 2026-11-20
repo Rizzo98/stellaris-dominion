@@ -1596,7 +1596,7 @@ function fleetTabHTML(row, col) {
           '<div class="fleet-section-head"><h3>GATE JUMP</h3><span class="fleet-selected-count">LOCKED</span></div>' +
           '<div class="slot-lock-note"><span>🌀</span><span>' + gateLockMessage(structure) + '</span></div>' +
         '</div>') +
-    '<p class="fleet-note">Tap ships to build a movement group. In the sector map, tap any hex to preview the shortest route and confirm it. Each ship travels up to its speed in hexes per turn. A patrolling corvette holds its hex, fires on a hostile within 1 hex each turn and protects that zone from raids; moving or jumping cancels patrol. Gate jumps cost ' + jumpCost + ' ⚡, are only available at an operational gate, and land on the destination lane\'s labelled hex.</p>'
+    '<p class="fleet-note">Tap ships to build a movement group. In the sector map, tap any hex to preview the shortest route and confirm it, or long-press a hex to send one of its ships without opening its dossier. Each ship travels up to its speed in hexes per turn. A patrolling corvette holds its hex, fires on a hostile within 1 hex each turn and protects that zone from raids; moving or jumping cancels patrol. Gate jumps cost ' + jumpCost + ' ⚡, are only available at an operational gate, and land on the destination lane\'s labelled hex.</p>'
   );
 }
 function renderPlanet() {

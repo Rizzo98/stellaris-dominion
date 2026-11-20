@@ -15,6 +15,26 @@
 }
 #toast.show{opacity:1;transform:translate(-50%,0)}
 
+/* Long-press progress ring: shown once a hold passes its reveal delay, so a
+   normal tap never flashes it. js/ui/long-press.js drives the ring's position
+   and the fill's dash offset; the ring itself never takes pointer events, so
+   it cannot become the pointerup target. */
+#hold-ring{
+  position:fixed;left:0;top:0;z-index:140;
+  width:44px;height:44px;pointer-events:none;
+  transform:translate(-50%,-50%);
+  opacity:0;transition:opacity .1s linear;
+}
+#hold-ring.on{opacity:1}
+#hold-ring svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}
+.hold-ring-track,.hold-ring-fill{fill:none;stroke-width:3}
+.hold-ring-track{stroke:rgba(124,184,255,.18)}
+.hold-ring-fill{
+  stroke:#67e8d5;stroke-linecap:round;
+  stroke-dasharray:119.38;stroke-dashoffset:119.38;
+  filter:drop-shadow(0 0 4px rgba(103,232,213,.45));
+}
+
 @media (max-width:350px){
   #topbar{padding-left:7px;padding-right:7px}
   #topbar .resources{gap:3px}

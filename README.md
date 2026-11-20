@@ -36,6 +36,8 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 
 **Ranged battle pass:** the battle sheet now covers patrol and stronghold fire across hexes. A hostile hex under patrol/stronghold fire gets the same **⚔** badge and a **RANGED DEFENCE** callout in both the hostile hex's and the defended hex's fleet tab. The balance and forecast only count units with a firing solution, so a stationary corvette caught by a patrol cannot return fire and a stronghold firing from radius 2 is shown as a static defender. The callout opens the same sheet from either side of the fight.
 
+**Quick-move pass:** holding a hex with a finger or the left mouse button is now a shortcut into the route-order pipeline. A hex with several ships raises a **Move ship** picker; a hex with one ship skips it and goes straight to the destination step. Tapping a destination still previews the route and **CONFIRM** orders it, so nothing moves instantly. The hold needs **420 ms** and **10 px** of drift tolerance (`CONFIG.hold`), charges a cyan ring and never steals the tap: with a route order already pending it declines, and the release click still picks the destination. See **Quick move (long press)** below.
+
 ## Rival empires, patrols and strongholds
 
 - **Seeded rivals** — galaxy generation calls `createRivalEmpires()`. The count (5–7), spawn sectors, names, archetypes and starting fleets come from a seeded stream that is independent of the event deck. Every ring gets one spawn before extra empires are placed, so the same seed always produces the same powers.
@@ -143,6 +145,15 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 - **Loading replaces the run** — `applySaveState()` swaps the global `state`, clears timers and drag state that outlive a run, hides the start/end/planet screens, repaints every view and shows a pending event if one was saved. The current run is gone unless it was saved first.
 - **Code** — snapshot, validation and restore rules live in `js/core/save.js`; browser/file transport and the start-screen card live in `js/game/save-actions.js`; the archive body is `saveSheetHTML()` in `js/ui/sheet-content.js`, opened by `openSaveSheet()` in `js/ui/sheets.js`. Bump `SAVE_VERSION` whenever the state shape changes incompatibly.
 
+## Quick move (long press)
+
+- **The gesture** — holding a sector hex for `CONFIG.hold.delayMs` (**420 ms**) arms a quick move; drifting more than `CONFIG.hold.slop` (**10 px**), a touch scroll's `pointercancel` or an early release abandons it. A cyan ring charges over the last part of the press and `navigator.vibrate(8)` fires where the browser supports it. `bindLongPress()` in `js/ui/long-press.js` is generic: it resolves `event.target.closest(selector)` exactly like the delegated click handler, so it can be attached to any `data-*` container.
+- **One ship, no menu** — a hex holding a single ship starts the order at once. `startQuickMove()` in `js/game/quick-move.js` sets the hex and the ship as the selection and calls the fleet tab's own `beginFleetMove()`, so the quick path and the long path share one validator and one banner.
+- **Several ships, a picker** — a hex holding more ships opens the **Move ship** sheet (`openQuickMoveSheet()` in `js/ui/sheets.js`, body from `quickMoveSheetHTML()` in `js/ui/sheet-content.js`). Rows reuse the fleet-tab hull card — icon, name, hull, speed, plus an existing **→ n:m** order chip or **🛡 PATROL R1** chip — and each row is one tap. The sheet remembers its hex, closes on a row and hands the ship over; it never owns the move state.
+- **The destination is the normal flow** — the banner asks for a hex, the tap previews the shortest route with per-type ETAs, and **CONFIRM** orders it. Each ship still advances up to its speed at end-turn, and the same **CANCEL** button returns to the dossier. A ship that is already moving keeps its hex until the turn ends; a new order replaces its route and stands its patrol down.
+- **The tap keeps working** — the hold swallows only the release click that follows it (capture-phase guard in `js/ui/long-press.js`, re-armed on release and cleared by the next press), so a two-second hold and a lost click both leave the following tap intact. A hex with no ships answers *No ships stationed in this hex*; a hold while a route order is pending **returns false** and changes nothing, so the release click still picks that hex as the destination.
+- **Discoverability and coverage** — the sector map carries a one-line hint under its legend and the fleet-tab note mentions the shortcut; `tests/quick-move-harness.js` covers the routing and the picker markup, while the gesture itself is checked in a real browser (see **Verification**).
+
 ## Run it
 
 - Double-click `index.html`, **or**
@@ -198,7 +209,7 @@ MVP V3.0/
 │   ├── sheets.css             bottom sheet, population menu (maintenance steppers, colony meters and crew reset), run archive, battle balance bar and forecast
 │   ├── event.css              event overlay and swipe card
 │   ├── screens.css            start/end screens, saved-run CONTINUE card, seed picker
-│   └── utilities.css          toast, small-screen and reduced-motion rules
+│   └── utilities.css          toast, the long-press progress ring, small-screen and reduced-motion rules
 └── js/
     ├── data/                  content and balance tables
     │   ├── config.js          CONFIG: starting sector stockpile, planet sizes/bonus slots, the colony economy (maintenance formulas, startup populations, facility levels, growth, happiness tiers), research upkeep, trade reach/amount caps, jump cost, sector/ring layout, event cadence, survey density, military rules, rival count and seed
@@ -239,13 +250,15 @@ MVP V3.0/
     │   ├── tech-view.js       research banner, the category switch and the grouped tech cards of the open category
     │   ├── empire-view.js     empire ledger, per-sector economy list, military summary, rival powers and dispatch log
     │   ├── planet-screen.js   hex details, clickable population card, colony slots with crew steppers and refit buttons, sector ledger, clickable spaceport ship construction and drydock refit/repair, survey sites, strongholds, radars and the per-route trading center editor, in-hex/ranged battle callout, patrol/contact dossier, fleet roster, jump ops and gate jumps
-    │   ├── sheet-content.js   HTML builders for the bottom sheet, including the maintenance menu, sector/empire resource breakdowns, stability telemetry, build picker, planet details, event deck and rival dossier
+    │   ├── sheet-content.js   HTML builders for the bottom sheet, including the maintenance menu, sector/empire resource breakdowns, stability telemetry, build picker, planet details, event deck, quick-move ship picker and rival dossier
     │   ├── battle-view.js     battle sheet: hero, balance bar, fleet manifests with ranged/distance tags, next-turn forecast and fleet-tab callout
     │   ├── render.js          renderAll() entry point
     │   ├── toast.js           transient feedback
-    │   └── sheets.js          bottom-sheet open/close, drag, the population menu open/refresh and the event deck inspector
+    │   ├── sheets.js          bottom-sheet open/close, drag, the population menu open/refresh, the quick-move ship picker and the event deck inspector
+    │   └── long-press.js      shared long-press gesture layer: hold timer, drift/cancel rules, progress ring and the release-click guard
     ├── game/                  state mutations and interactions
     │   ├── planet-nav.js      navigation, distant route preview/orders, sector-priced gate jumps that spend gate ops
+    │   ├── quick-move.js      long-press quick move: hex → one-ship shortcut or ship picker → the normal destination order
     │   ├── actions.js         colonise, build, building refits, ship refits and repairs, unlock bonus slots, maintenance steppers, crew orders, research, trading center route controls
     │   ├── military-actions.js SET PATROL / STAND DOWN for selected corvettes
     │   ├── survey-actions.js  BEGIN SURVEY / ABANDON SURVEY commands
@@ -264,6 +277,7 @@ tests/
 ├── name-harness.js            Node VM logic checks for charted names, the one-lane fog halo and the sector-power gate
 ├── tech-harness.js            Node VM logic + UI checks for the three tech categories, building refits, ship refits and repairs, the stronghold line, radar/gate/trade techs and the new screens
 ├── save-harness.js            Node VM checks for snapshots, validation, RNG and deck continuation and a full turn on a restored run
+├── quick-move-harness.js      Node VM checks for the long-press routing, the single-ship shortcut, the ship picker hand-off, the pending-order and phase guards and the picker markup
 └── fog-harness.js             Node VM UI checks for what the galaxy, sector, topbar and dossier screens may publish
 ```
 
@@ -274,7 +288,9 @@ The scripts are **classic scripts sharing one global scope**, so the order in `i
 ```
 data → core (rng, galaxy, state, rules, colony economy, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save) → ui → game → main
 ```
-`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js` and `tests/save-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech and stability harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js`, `tests/quick-move-harness.js` and `tests/save-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech, stability and quick-move harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+
+`js/ui/long-press.js` sits at the end of the `ui` group (before the `game` files) and `js/game/quick-move.js` follows `planet-nav.js`, because the quick move hands its ship to `beginFleetMove()`.
 
 `js/core/state.js` only declares `let state = null`. The run (including the galaxy) is created once every script is loaded, at the bottom of `js/main.js`:
 
@@ -349,6 +365,7 @@ When adding a file, add its `<script>` tag in the right layer and keep `main.js`
 | Change battle counts, balance weights or the forecast | `js/core/combat.js` (`getHexBattleReadout`, `getBattleBalance`, `getBattleForecast`); `canFire` decides which units join a volley |
 | Change the war badge, battle sheet or callout | `js/ui/map.js`, `js/ui/battle-view.js`, `js/ui/planet-screen.js`, `css/views.css`, `css/sheets.css`, `css/planet.css` |
 | Change the SET PATROL / STAND DOWN commands | `js/game/military-actions.js` |
+| Change the long-press timing, ring or quick-move flow | `CONFIG.hold` in `js/data/config.js`, `js/ui/long-press.js`, `js/game/quick-move.js` |
 | Change the sector THREAT tile or enemy markers | `js/ui/map.js`, `css/views.css` |
 | Change the sector VIEW layer menu | `index.html`, `js/ui/map.js`, `css/galaxy.css` |
 | Change the galaxy VIEW menu or add another galaxy layer | `index.html`, `js/ui/galaxy-view.js`, `css/galaxy.css` |
@@ -391,7 +408,7 @@ When adding a file, add its `<script>` tag in the right layer and keep `main.js`
 
 ## Verification
 
-The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Colony economy pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
+The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Quick move pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
 
 The randomized ring galaxy was exercised in headless Chrome with scripted runs:
 
@@ -622,3 +639,17 @@ Low stability no longer slows production. It makes the empire dangerous to gover
 - **Population:** `applyEffects({ population: -1 })` removed one person from the unhappiest colony only, a −5 loss clamped at **0** instead of going negative, and the effect pill rendered **👥-1**.
 - **Sheet and topbar:** the sheet printed **Unrest chance 20.7% / turn**, **Last unrest · Turn 2 · Bread Riot · Solara** and no production penalty; the topbar chip read **UNREST 48%** at 20 stability with the `low` class.
 - **Browser smoke:** a headless-Chrome run forced stability to 25 and ended a real turn: the **Bread Riot** card rendered with the red **🔥 UNREST** chip, three response buttons and their effect pills, while a second run drew the two-choice **General Strike** swipe card. Resolving *Open the emergency stores* in the real DOM paid **−6 ⚡**, moved stability **47.5 → 51.5** and returned the game to actions with no console errors. Screenshots at **430 × 932** showed both card layouts and the updated stability sheet.
+
+### Quick move pass
+
+Long-pressing a hex is now a shortcut into the route-order pipeline: pick a ship (or skip the picker when only one is stationed there), then the map takes the destination exactly as it does from the fleet tab.
+
+- **Harnesses:** `node tests/quick-move-harness.js` is a new Node VM harness with **41 checks** covering the empty hex, the single-ship shortcut, the multi-ship picker, the row hand-off, the pending-order and phase guards, the stale-ship refusal and the picker markup. The colony (**306**), economy (**154**), fog (**74**), military (**217**), name (**61**), population (**172**), save (**63**), stability (**126**) and technology (**213**) harnesses still pass.
+- **Tap unchanged:** a 70 ms touch tap on the capital hex opened its dossier (`state.ui.selectedHex` set, planet screen visible) and no picker.
+- **Hold → picker:** a 700 ms touch hold on the same hex opened **Move ship** with the kicker `SOLARA CORE · HEX 3:4`, **4 rows** (Corvette A, Corvette B, Science Ship, Builder) and no `state.ui.move` yet. The release click did not dismiss the sheet.
+- **Pick → destination:** clicking the Corvette B row closed the sheet and set `state.ui.move = { ids: ["ship-2-corvette-b"], from: "2,3" }` with the banner reading *1 ship ready. Tap any destination hex.*. Tapping hex `0,0` previewed a **4-hex** route (*slowest ETA 4 turns*), and **CONFIRM** wrote a 4-hex `ship.path`, cleared the order and raised *Route ordered for 1 ship · 4 hexes · slowest ETA 4 turns.*
+- **One ship:** a hex holding a single corvette skipped the picker entirely; the hold set the order and the toast read *Corvette A — tap a destination hex.*
+- **Empty hex:** a hold raised *No ships stationed in this hex. Hold a fleet to move one.*, started no order, and the next tap still opened the dossier.
+- **Pending order:** a hold while a route was being chosen declined the gesture (`handleHexLongPress` returned `false`), kept the sheet closed, kept `state.ui.move` alive and let the release click pick the destination (`previewDestination` became the held hex).
+- **Long hold:** a 2.6 s mouse hold on a single-ship hex set the order and still swallowed its release click; a destination tap immediately afterwards previewed the route, so the guard re-arms on release and clears on the next press.
+- **Page health:** the scripted run at **390 × 844** raised no console errors; screenshots confirmed the charging ring, the picker, the move banner and the route preview. At **320 × 640** the picker fitted the viewport (76% of the height, no horizontal overflow).

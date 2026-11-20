@@ -529,3 +529,12 @@
 .strategy-note{
   margin-top:6px;font-family:var(--mono);font-size:6.8px;line-height:1.5;color:var(--faint);
 }
+
+/* ---------- quick move (long press) ---------- */
+.quick-move-list{margin-top:9px}
+.quick-move-row{grid-template-columns:38px minmax(0,1fr) auto}
+.quick-move-row:active{transform:scale(.995)}
+.quick-move-arrow{
+  font-family:var(--mono);font-size:13px;line-height:1;
+  color:var(--cyan);opacity:.9;padding-left:2px;
+}

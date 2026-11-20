@@ -10,7 +10,11 @@ function showSheet(options) {
     kind: options.kind,
     systemId: options.systemId || null,
     slotIndex: typeof options.slotIndex === "number" ? options.slotIndex : null,
-    resource: options.resource || null
+    resource: options.resource || null,
+    /* The quick-move picker remembers which hex it was opened for, so a row
+       can hand its ship to the map without reading the current selection. */
+    hexKey: options.hexKey || null,
+    sectorId: options.sectorId || null
   };
   els.sheet.dataset.kind = options.kind || "default";
   els.sheetKicker.textContent = options.kicker || "DETAILS";
@@ -76,6 +80,24 @@ function openBuildSheet(systemId, slotIndex) {
     kicker: system.name.toUpperCase() + " · SLOT " + (slotIndex + 1),
     title: "Construct",
     body: buildSheetHTML(system, slotIndex)
+  });
+}
+
+/* Long press on a sector hex with several ships: pick which one moves. The
+   sheet is a launcher, not a selection screen — a row starts the normal route
+   order and closes the sheet, and the map then takes the destination. */
+function openQuickMoveSheet(ships, hexKeyValue, sectorId) {
+  if (state.phase !== "actions") return;
+  if (!ships || !ships.length || !hexKeyValue) return;
+  const pos = parseHexKey(hexKeyValue);
+  const sectorLabel = getSectorLabel(sectorId || state.ui.activeSector);
+  showSheet({
+    kind: "quick-move",
+    hexKey: hexKeyValue,
+    sectorId: sectorId || state.ui.activeSector,
+    kicker: sectorLabel.toUpperCase() + " · HEX " + (pos.row + 1) + ":" + (pos.col + 1),
+    title: "Move ship",
+    body: quickMoveSheetHTML(ships)
   });
 }
 

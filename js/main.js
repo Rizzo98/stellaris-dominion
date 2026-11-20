@@ -124,6 +124,15 @@ function bindEvents() {
     const pos = parseHexKey(group.getAttribute("data-hex"));
     handleHexTap(pos.row, pos.col);
   });
+  /* Long press a hex to send one of its ships: a single ship starts the route
+     order at once, several open the picker, and the map then takes the
+     destination. Returning false leaves the release click to the tap handler,
+     so a pending move still picks its destination from a long press. */
+  bindLongPress(els.sectorMap, "[data-hex]", function (group) {
+    const pos = parseHexKey(group.getAttribute("data-hex"));
+    return handleHexLongPress(pos.row, pos.col);
+  });
+
   els.moveCancel.addEventListener("click", function () { cancelFleetMove(true); });
   els.moveConfirm.addEventListener("click", confirmFleetMove);
 
@@ -303,6 +312,11 @@ function bindEvents() {
 
   // Build sheet actions.
   els.sheetBody.addEventListener("click", function (event) {
+    const quickMoveShip = event.target.closest("[data-quick-move-ship]");
+    if (quickMoveShip && state.ui.sheet && state.ui.sheet.kind === "quick-move") {
+      selectQuickMoveShip(quickMoveShip.getAttribute("data-quick-move-ship"));
+      return;
+    }
     const saveButton = event.target.closest("[data-save-action]");
     if (saveButton) {
       handleSaveAction(saveButton.getAttribute("data-save-action"));

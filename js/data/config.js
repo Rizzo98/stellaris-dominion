@@ -48,6 +48,12 @@ const CONFIG = {
      until it completes. Every other upkeep is paid by the sector it sits in. */
   research: { energyUpkeep: 1 },
 
+  /* Long press on the sector map: holding a hex opens the quick-move picker
+     for the ships stationed there. delayMs is how long the press must last
+     before it counts; slop is how far the finger or mouse may drift before
+     the press is read as a scroll instead. */
+  hold: { delayMs: 420, slop: 10 },
+
   /* Trading centers move energy and minerals between sectors. A center only
      works while its sector holds an operational gate; its reach follows the
      galaxy lanes, and a hop that leaves a sector other than the center's own
