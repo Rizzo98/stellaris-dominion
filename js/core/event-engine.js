@@ -1,9 +1,14 @@
 /* ============================================================
-   EVENT ENGINE — cadence, category weights and weighted bucket draws
+   EVENT ENGINE — cadence, category weights, weighted bucket draws and unrest
    The deck is data-driven. EVENTS holds the cards, EVENT_CATEGORIES holds
    one weight multiplier per category and EVENT_BUCKETS holds which cards
    each category can draw. Weights are read at draw time, so editing a
    card's weight or a category's weightMult changes the deck immediately.
+
+   Civil unrest is a second, stability-driven draw path. UNREST_EVENTS holds
+   those cards; they are never in EVENT_BUCKETS. getUnrestChance() maps the
+   stability bar to a per-turn probability (0 at 100, rising as it falls) and
+   rollUnrestEvent() returns a ready-to-show card or null.
 
    Tuning API (all safe to call from the console or future content):
      setEventCategoryWeight("hazard", 0)    // retire a whole category
@@ -109,7 +114,12 @@ function createEventState() {
     count: 0,
     lastEventId: null,
     lastCategory: null,
-    history: []
+    history: [],
+    /* Unrest has its own draw history; it never touches the deck schedule. */
+    unrestCount: 0,
+    lastUnrestId: null,
+    lastUnrestTurn: null,
+    lastUnrestColony: null
   };
 }
 
@@ -136,6 +146,125 @@ function drawEvent() {
   if (state.events.history.length > 40) state.events.history.shift();
   state.events.nextTurn = state.turn + getEventInterval();
   return event;
+}
+
+/* ---------- civil unrest ----------
+   Low stability does not touch production: it raises the chance that the
+   turn ends with an unrest card. The chance is 0 at 100 stability and rises
+   as the bar falls:
+
+     p = maxChance × ((100 − S) / 100) ^ exponent
+
+   The card pool is UNREST_EVENTS. Unrest prefers the unhappiest colony with
+   people in it, and its energy/mineral/population effects hit that colony's
+   sector. */
+
+function getUnrestConfig() {
+  const cfg = (CONFIG && CONFIG.stability && CONFIG.stability.unrest) || {};
+  const numberOr = function (value, fallback) {
+    return typeof value === "number" && isFinite(value) ? value : fallback;
+  };
+  return {
+    maxChance: clamp(numberOr(cfg.maxChance, 0.75), 0, 1),
+    exponent: Math.max(0.1, numberOr(cfg.exponent, 2))
+  };
+}
+
+/* The per-turn probability of an unrest card at a given stability. */
+function getUnrestChance(stability) {
+  const cfg = getUnrestConfig();
+  const raw = stability == null
+    ? (state && typeof state.stability === "number" ? state.stability : 100)
+    : stability;
+  const value = clamp(Number(raw) || 0, 0, 100);
+  const gap = (100 - value) / 100;
+  if (gap <= 0) return 0;
+  return clamp(cfg.maxChance * Math.pow(gap, cfg.exponent), 0, 1);
+}
+
+function getUnrestEvents() {
+  if (typeof UNREST_EVENTS === "undefined") return [];
+  return UNREST_EVENTS.filter(function (event) {
+    return !!event && event.enabled !== false;
+  });
+}
+
+function getUnrestEventById(id) {
+  const pool = getUnrestEvents();
+  for (let i = 0; i < pool.length; i += 1) {
+    if (pool[i].id === id) return pool[i];
+  }
+  return null;
+}
+
+/* The unhappiest colony that still has people: unrest starts where the mood
+   is worst. The earliest colony keeps a tie. */
+function getUnrestTargetColony() {
+  if (!state || !state.galaxy) return null;
+  let target = null;
+  state.galaxy.sectors.forEach(function (sector) {
+    const allocation = getSectorColonyAllocations(sector.id);
+    Object.keys(allocation.byId).forEach(function (systemId) {
+      const report = allocation.byId[systemId];
+      if (!report || !(report.population > 0)) return;
+      if (!target || report.happiness < target.report.happiness) {
+        target = { system: getSystem(systemId), report: report };
+      }
+    });
+  });
+  return target;
+}
+
+/* One card from the unrest pool, never the same card twice in a row. */
+function pickUnrestEvent() {
+  const all = getUnrestEvents();
+  if (!all.length) return null;
+  const lastId = state.events ? state.events.lastUnrestId : null;
+  const fresh = all.filter(function (event) { return event.id !== lastId; });
+  const pool = fresh.length ? fresh : all;
+  const weightOf = function (event) {
+    return typeof event.weight === "number" && event.weight > 0 ? event.weight : 1;
+  };
+  const total = pool.reduce(function (sum, event) { return sum + weightOf(event); }, 0);
+  if (total <= 0) return null;
+  const random = typeof state.rng === "function" ? state.rng : Math.random;
+  let roll = random() * total;
+  for (let i = 0; i < pool.length; i += 1) {
+    roll -= weightOf(pool[i]);
+    if (roll < 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+/* Rolls the turn's unrest card. Returns null most of the time, and always at
+   100 stability (the roll consumes no RNG in that case). */
+function rollUnrestEvent() {
+  if (!state || !state.events) return null;
+  const chance = getUnrestChance(state.stability);
+  if (chance <= 0) return null;
+  const random = typeof state.rng === "function" ? state.rng : Math.random;
+  if (random() >= chance) return null;
+  const template = pickUnrestEvent();
+  if (!template) return null;
+  const target = getUnrestTargetColony();
+  const colonyName = target && target.system ? target.system.name : "the colonies";
+  const card = {
+    id: template.id,
+    title: template.title,
+    emoji: template.emoji,
+    kicker: template.kicker || "CIVIL UNREST",
+    category: "unrest",
+    text: String(template.text || "").replace(/\{colony\}/g, colonyName),
+    choices: template.choices,
+    sectorId: target && target.system ? target.system.sectorId : null,
+    unrest: true,
+    colonyName: colonyName
+  };
+  state.events.unrestCount = (state.events.unrestCount || 0) + 1;
+  state.events.lastUnrestId = template.id;
+  state.events.lastUnrestTurn = state.turn;
+  state.events.lastUnrestColony = colonyName;
+  return card;
 }
 
 /* ---------- deck inspection / tuning ---------- */
@@ -266,6 +395,26 @@ function validateEventDeck() {
       problems.push("Event " + event.id + " is not in any bucket");
     }
   });
+  if (typeof UNREST_EVENTS !== "undefined") {
+    const unrestIds = new Set();
+    UNREST_EVENTS.forEach(function (event) {
+      if (!event || !event.id) {
+        problems.push("Unrest card without an id");
+        return;
+      }
+      if (unrestIds.has(event.id)) problems.push("Duplicate unrest card id: " + event.id);
+      unrestIds.add(event.id);
+      if (EVENTS.some(function (other) { return other.id === event.id; })) {
+        problems.push("Unrest card id collides with an encounter: " + event.id);
+      }
+      if (event.category !== "unrest") {
+        problems.push("Unrest card " + event.id + " uses category: " + event.category);
+      }
+      if (!Array.isArray(event.choices) || !event.choices.length) {
+        problems.push("Unrest card " + event.id + " has no choices");
+      }
+    });
+  }
   if (problems.length && typeof console !== "undefined" && console.warn) {
     console.warn("[event deck] " + problems.join(" · "));
   }

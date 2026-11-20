@@ -283,16 +283,111 @@ function getEconomySectorId() {
   return home ? home.sectorId : (state.galaxy.sectors[0] ? state.galaxy.sectors[0].id : null);
 }
 
-/* Sectors whose current stock cannot cover their projected infrastructure
-   upkeep. Population maintenance is intentionally excluded: a colony that
-   cannot fully fund it loses happiness, not the empire's stability. */
+/* Sectors whose infrastructure bill will not be covered once this turn's
+   population maintenance has left the ledger. The maintenance itself is not
+   a deficit: a colony that cannot fully fund it loses happiness, not the
+   empire's stability. The check mirrors paySectorUpkeep(), so the stability
+   sheet forecasts the same penalty the turn will charge. */
 function getSectorsInDeficit() {
   if (!state || !state.galaxy) return [];
   return state.galaxy.sectors.filter(function (sector) {
-    const econ = getSectorEconomy(sector.id);
-    const due = Math.max(0, econ.infrastructureUpkeep || 0);
-    return due > 0 && getSectorStock(sector.id, "energy") + 1e-9 < due;
+    const due = Math.max(0, getSectorEconomy(sector.id).infrastructureUpkeep || 0);
+    if (due <= 0) return false;
+    const allocation = getSectorColonyAllocations(sector.id);
+    const remaining = Math.max(0, allocation.energy.available - allocation.energy.spent);
+    return remaining + 1e-9 < due;
   });
+}
+
+/* ---------- stability ----------
+   Stability is a moving average of the empire's mood. Each turn it keeps
+   'drag' of its value and takes the rest from the population-weighted
+   happiness of every colony, then takes the one-off infrastructure penalty.
+   The projection is pure so the stability sheet can explain the next turn
+   before the player ends it. */
+
+function getStabilityConfig() {
+  const cfg = (CONFIG && CONFIG.stability) || {};
+  const numberOr = function (value, fallback) {
+    return typeof value === "number" && isFinite(value) ? value : fallback;
+  };
+  const drag = clamp(numberOr(cfg.drag, 0.7), 0, 1);
+  return {
+    start: numberOr(cfg.start, 70),
+    drag: drag,
+    weight: 1 - drag,
+    lowThreshold: numberOr(cfg.lowThreshold, 30),
+    energyDeficitPenalty: Math.max(0, numberOr(cfg.energyDeficitPenalty, 2))
+  };
+}
+
+/* One entry per colony for the sheet: the report the turn would use, with
+   the colony's name attached. Only colonized player worlds are in the
+   allocation, so rival colonies never pull the empire's mood. */
+function getStabilityColonySources() {
+  const sources = [];
+  if (!state || !state.galaxy) return sources;
+  state.galaxy.sectors.forEach(function (sector) {
+    const allocation = getSectorColonyAllocations(sector.id);
+    Object.keys(allocation.byId).forEach(function (systemId) {
+      const system = getSystem(systemId);
+      const report = allocation.byId[systemId];
+      sources.push({
+        systemId: systemId,
+        name: system ? system.name : systemId,
+        population: report.population,
+        happiness: report.happiness
+      });
+    });
+  });
+  return sources;
+}
+
+/* The happiness target behind the drag. A resolved maintenance summary is
+   reused when the turn pipeline supplies one; without it every colony is
+   measured against the live ledger, which is what the sheet previews. */
+function getStabilityTarget(maintenance) {
+  if (maintenance && Array.isArray(maintenance.sectors)) {
+    const reports = [];
+    maintenance.sectors.forEach(function (allocation) {
+      (allocation.systems || []).forEach(function (report) { reports.push(report); });
+    });
+    return summarizeColonyHappiness(reports);
+  }
+  return summarizeColonyHappiness(getStabilityColonySources());
+}
+
+/* Where stability stands, where the colonies pull it and what the next turn
+   would make of it. Pure: the sheet and the turn pipeline share this math. */
+function getStabilityProjection(maintenance, deficit) {
+  const cfg = getStabilityConfig();
+  const current = clamp(Number(state && state.stability) || 0, 0, 100);
+  const target = getStabilityTarget(maintenance);
+  const blended = target.happiness === null
+    ? current
+    : clamp(cfg.drag * current + cfg.weight * target.happiness, 0, 100);
+  const penalty = deficit ? cfg.energyDeficitPenalty : 0;
+  const next = clamp(blended - penalty, 0, 100);
+  return {
+    current: current,
+    drag: cfg.drag,
+    weight: cfg.weight,
+    target: target.happiness,
+    targetPopulation: target.population,
+    targetColonies: target.colonies,
+    contributions: target.contributions,
+    blend: blended,
+    penalty: penalty,
+    next: next
+  };
+}
+
+/* The turn step. A result the topbar would round to 0 is stored as 0, so the
+   usual stability check ends the run instead of leaving a faint pulse. */
+function advanceStability(maintenance, options) {
+  const projection = getStabilityProjection(maintenance, !!(options && options.deficit));
+  state.stability = projection.next < 0.5 ? 0 : projection.next;
+  return projection;
 }
 
 /* The research directorate draws its upkeep from the capital's sector grid. */
@@ -426,17 +521,14 @@ function getSectorEconomy(sectorId) {
   });
 
   const ethic = getEthic();
-  const stabilityMult = state.stability < CONFIG.stability.lowThreshold
-    ? CONFIG.stability.productionMultiplier
-    : 1;
   const mineralMult = ethic && ethic.mineralMult ? ethic.mineralMult : 1;
   const researchMult = ethic && ethic.researchMult ? ethic.researchMult : 1;
 
   const income = {
-    energy: roundIncome(raw.energy * stabilityMult),
-    minerals: roundIncome(raw.minerals * mineralMult * stabilityMult),
-    research: roundIncome(raw.research * researchMult * stabilityMult),
-    influence: roundIncome(raw.influence * stabilityMult)
+    energy: roundIncome(raw.energy),
+    minerals: roundIncome(raw.minerals * mineralMult),
+    research: roundIncome(raw.research * researchMult),
+    influence: roundIncome(raw.influence)
   };
   const infrastructureUpkeep = colonyUpkeep + buildingUpkeep + structureUpkeep + researchUpkeep;
   const upkeep = infrastructureUpkeep + populationUpkeepEnergy;
@@ -453,14 +545,10 @@ function getSectorEconomy(sectorId) {
 
   const mineralMods = [];
   if (mineralMult !== 1) mineralMods.push({ label: "Militarist doctrine", mult: mineralMult });
-  if (stabilityMult !== 1) mineralMods.push({ label: "Unrest", mult: stabilityMult });
   const researchMods = [];
   if (researchMult !== 1) researchMods.push({ label: "Xenophile doctrine", mult: researchMult });
-  if (stabilityMult !== 1) researchMods.push({ label: "Unrest", mult: stabilityMult });
   const energyMods = [];
-  if (stabilityMult !== 1) energyMods.push({ label: "Unrest", mult: stabilityMult });
   const influenceMods = [];
-  if (stabilityMult !== 1) influenceMods.push({ label: "Unrest", mult: stabilityMult });
 
   const strongholdCount = structureCounts.stronghold || 0;
   const strongholdUpkeep = strongholdCount * ((STRUCTURE_TYPES.stronghold && STRUCTURE_TYPES.stronghold.energyUpkeep) || 0);
@@ -511,8 +599,6 @@ function getSectorEconomy(sectorId) {
     trade: tradeFlow,
     net: net,
     sources: sources,
-    stabilityMult: stabilityMult,
-    instability: stabilityMult !== 1,
     mineralMult: mineralMult,
     researchMult: researchMult,
     mods: {
@@ -627,14 +713,11 @@ function getEconomy() {
       addEntry(influenceSources, source.label, source.amount, source.sub);
     });
   });
-  const stabilityMult = state.stability < CONFIG.stability.lowThreshold
-    ? CONFIG.stability.productionMultiplier
-    : 1;
   sources.influence = influenceSources;
   const rawInfluence = raw.influence + CONFIG.baseIncome.influence +
     (ethic && ethic.influenceFlat ? ethic.influenceFlat : 0) +
     (hasTech("diplomacyNetwork") ? TECHS.diplomacyNetwork.influenceBonus : 0);
-  income.influence = roundIncome(rawInfluence * stabilityMult);
+  income.influence = roundIncome(rawInfluence);
 
   const upkeep = infrastructureUpkeep + populationUpkeepEnergy;
   income.energy = roundIncome(income.energy);
@@ -648,18 +731,12 @@ function getEconomy() {
   const mineralMods = [];
   const mineralMult = ethic && ethic.mineralMult ? ethic.mineralMult : 1;
   if (mineralMult !== 1) mineralMods.push({ label: "Militarist doctrine", mult: mineralMult });
-  if (stabilityMult !== 1) mineralMods.push({ label: "Unrest", mult: stabilityMult });
 
   const researchMods = [];
   const researchMult = ethic && ethic.researchMult ? ethic.researchMult : 1;
   if (researchMult !== 1) researchMods.push({ label: "Xenophile doctrine", mult: researchMult });
-  if (stabilityMult !== 1) researchMods.push({ label: "Unrest", mult: stabilityMult });
   const energyMods = [];
   const influenceMods = [];
-  if (stabilityMult !== 1) {
-    energyMods.push({ label: "Unrest", mult: stabilityMult });
-    influenceMods.push({ label: "Unrest", mult: stabilityMult });
-  }
   const populationMaintenance = {
     colonies: colonyCount,
     energyRequested: populationUpkeepEnergy,
@@ -683,8 +760,6 @@ function getEconomy() {
     idleJobs: idleJobs,
     idleBuildings: idleBuildings,
     blockedBuildings: blockedBuildings,
-    stabilityMult: stabilityMult,
-    instability: stabilityMult !== 1,
     strongholdCount: strongholdCount,
     strongholdUpkeep: strongholdUpkeep,
     tradeCenterCount: tradeCenterCount,
@@ -713,9 +788,7 @@ function getEconomy() {
       influence: influenceMods
     },
     mineralMult: mineralMult,
-    researchMult: researchMult,
-    influenceMult: stabilityMult,
-    energyMult: stabilityMult
+    researchMult: researchMult
   };
 }
 

@@ -14,11 +14,33 @@ const CONFIG = {
      online, so a brand-new run can pay its first maintenance bill. */
   startingResources: { energy: 15, minerals: 15, research: 0, influence: 5 },
   baseIncome: { energy: 4, minerals: 4, research: 0, influence: 1 },
+  /* Stability is an empire-wide moving average of how its people live. Each
+     turn the value keeps a share of what it had and takes the rest from the
+     population-weighted happiness of every colony:
+
+       H̄ = Σ(F_i · P_i) / Σ(P_i)
+       S' = clamp(drag · S + (1 − drag) · H̄, 0, 100)
+
+     Population is the weight, so a 20-person world pulls four times as hard
+     as a 5-person one. With no colony population the value simply holds.
+     Event choices, raids and the infrastructure deficit are shocks applied
+     on top of the blend, so they fade over the following turns instead of
+     resetting the stat. */
   stability: {
     start: 70,
+    /* 0.7 keeps most of the value; the remaining 0.3 is the new mood. */
+    drag: 0.7,
+    /* Presentation threshold: the topbar calls the bar low below this. Low
+       stability no longer touches production. */
     lowThreshold: 30,
-    productionMultiplier: 0.75,
-    energyDeficitPenalty: 2
+    energyDeficitPenalty: 2,
+    /* Instead, a low bar raises the chance of a civil-unrest card at the end
+       of the turn: p = maxChance × ((100 − S) / 100) ^ exponent. It is 0 at
+       100 and grows as the bar falls. */
+    unrest: {
+      maxChance: 0.75,
+      exponent: 2
+    }
   },
   colonizeCost: { minerals: 10, influence: 3 },
   colonyEnergyUpkeep: 1,

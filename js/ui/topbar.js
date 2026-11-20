@@ -93,11 +93,11 @@ function renderTopbar() {
     if (delta < 0) el.classList.add("bad");
   });
 
-  els.stabilityValue.textContent = state.stability;
+  els.stabilityValue.textContent = formatStability(state.stability);
   els.stabilityFill.style.width = clamp(state.stability, 0, 100) + "%";
   els.stabilityBtn.classList.toggle("low", state.stability < CONFIG.stability.lowThreshold);
   els.stabilityBtn.classList.toggle("critical", state.stability < 15);
-  els.stabilityMode.textContent = "UNREST −25%";
+  els.stabilityMode.textContent = "UNREST " + Math.round(getUnrestChance(state.stability) * 100) + "%";
 }
 
 function setResourceTexts(values) {

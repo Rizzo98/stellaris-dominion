@@ -164,7 +164,7 @@ function renderEmpireView() {
   const activeName = state.tech.active ? TECHS[state.tech.active].name : "None";
   const military = state.military || { kills: 0, losses: 0, battles: 0, raids: 0 };
   els.empireMeta.innerHTML =
-    "<span>STABILITY " + state.stability + "/100 · " + completedBuildings + " BUILDINGS</span>" +
+    "<span>STABILITY " + formatStability(state.stability) + "/100 · " + completedBuildings + " BUILDINGS</span>" +
     "<span>TECHS " + completedTechCount() + " · " + activeName.toUpperCase() +
       " · ⚔ " + military.kills + "K / " + military.losses + "L</span>";
 

@@ -200,6 +200,43 @@ function getPopulationGrowthForHappiness(population, happiness) {
   return p * cfg.growthRate * (f / cfg.happinessMax);
 }
 
+/* Population-weighted happiness across a set of colony reports. This is the
+   'felicità' signal the empire's stability drags toward: a 20-person colony
+   counts four times as much as a 5-person one, so one big unhappy world can
+   outweigh several small content ones. Colonies with no population carry no
+   weight; with no people at all the weighted value is null and the caller
+   holds stability instead of dividing by zero. */
+function summarizeColonyHappiness(sources) {
+  const cfg = getEconomyConfig();
+  const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
+  const contributions = [];
+  let weightedTotal = 0;
+  let population = 0;
+  list.forEach(function (source) {
+    const p = Math.max(0, Number(source.population) || 0);
+    if (p <= 0) return;
+    const happiness = clamp(Number(source.happiness) || 0, 0, cfg.happinessMax);
+    weightedTotal += happiness * p;
+    population += p;
+    contributions.push({
+      id: source.id || source.systemId || null,
+      name: source.name || null,
+      population: p,
+      happiness: happiness,
+      share: 0
+    });
+  });
+  contributions.forEach(function (entry) {
+    entry.share = population > 0 ? entry.population / population : 0;
+  });
+  return {
+    happiness: population > 0 ? weightedTotal / population : null,
+    population: population,
+    colonies: contributions.length,
+    contributions: contributions
+  };
+}
+
 /* The projected report for one colony. When an allocation is supplied by
    getSectorColonyAllocations() the spent figures are the sector's final
    answer; without one the colony is measured against the sector's current

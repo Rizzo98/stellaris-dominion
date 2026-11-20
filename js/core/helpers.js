@@ -38,6 +38,12 @@ function formatMultiplier(mult) {
   return "×" + mult.toFixed(2);
 }
 
+/* Stability is a continuous moving average under the hood; the topbar, the
+   end screen and the empire view read the whole number the bar shows. */
+function formatStability(value) {
+  return String(Math.round(clamp(Number(value) || 0, 0, 100)));
+}
+
 /* ---------- galaxy / sector lookups ---------- */
 
 function getSector(sectorId) {

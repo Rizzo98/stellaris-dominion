@@ -203,10 +203,11 @@ function endTurn() {
   //    per turn however many sectors are short.
   const upkeepReport = paySectorUpkeep();
 
-  // 3. Overexpansion pressure + stability check.
-  if (upkeepReport.deficit) {
-    state.stability = clamp(state.stability - CONFIG.stability.energyDeficitPenalty, 0, 100);
-  }
+  // 3. Stability follows the empire's mood: it keeps a share of its current
+  //    value and takes the rest from the population-weighted happiness of
+  //    every colony (see getStabilityProjection). An infrastructure shortfall
+  //    is charged once on top, however many sectors are short.
+  advanceStability(maintenanceReport, { deficit: upkeepReport.deficit });
   if (state.stability <= 0) {
     endGame("stability");
     return;
@@ -257,10 +258,12 @@ function endTurn() {
   investResearchStock();
   if (state.phase === "ended") return;
 
-  // 9. Encounter cards are paced. Only a turn the deck is due draws a card;
-  //    every other turn returns straight to free actions.
+  // 9. Encounter cards are paced, but civil unrest is not: low stability can
+  //    force an unrest card this turn. The roll reads the stability the player
+  //    is about to see, and unrest preempts a due encounter card.
   const after = getDisplayResources();
-  state.currentEvent = isEventDue(state.turn) ? drawEvent() : null;
+  const unrest = rollUnrestEvent();
+  state.currentEvent = unrest || (isEventDue(state.turn) ? drawEvent() : null);
   if (state.currentEvent) {
     state.phase = "event";
     renderAll();
@@ -334,7 +337,7 @@ function endGame(reason) {
   els.endTurns.textContent = state.turn;
   els.endColonies.textContent = colonies;
   els.endTechs.textContent = completedTechCount();
-  els.endStability.textContent = state.stability;
+  els.endStability.textContent = formatStability(state.stability);
   if (els.endBattles) els.endBattles.textContent = state.military ? state.military.battles : 0;
   if (els.endKills) els.endKills.textContent = state.military ? state.military.kills : 0;
   els.endScreen.classList.remove("hidden");

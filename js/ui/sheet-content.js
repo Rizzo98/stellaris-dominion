@@ -54,6 +54,9 @@ function eventDeckSheetHTML() {
     '<p class="sheet-note">The deck lives in js/data/events.js: each card has a weight, each category has a weight multiplier, and a bucket lists which cards the category can draw. ' +
     "Use setEventCategoryWeight, setEventWeight, addEventToBucket or removeEventFromBucket to retune it live.</p>"
   );
+  parts.push(
+    '<p class="sheet-note">Civil unrest is not part of this deck. UNREST_EVENTS holds the riots, strikes and protests, and the stability system rolls for one at the end of a turn when the bar is low; an unrest card never consumes a deck slot.</p>'
+  );
   return parts.join("");
 }
 
@@ -345,35 +348,87 @@ function resourceSheetHTML(type) {
 }
 
 function stabilitySheetHTML() {
-  const low = state.stability < CONFIG.stability.lowThreshold;
+  const cfg = getStabilityConfig();
+  const deficitSectors = getSectorsInDeficit();
+  const projection = getStabilityProjection(null, deficitSectors.length > 0);
+  const current = projection.current;
+  const low = current < cfg.lowThreshold;
+  const change = projection.next - current;
+  const trend = low ? "UNREST" : change > 0.05 ? "RISING" : change < -0.05 ? "FALLING" : "STABLE";
+  const trendClass = low || change < -0.05 ? "text-bad" : "text-good";
+  const targetText = projection.target === null ? null : formatAmount(projection.target);
   const parts = [];
+
   parts.push(
     '<div class="sheet-summary">' +
       '<span class="big-icon" aria-hidden="true">⚖</span>' +
-      '<span class="big-value">' + state.stability + "</span>" +
-      '<span class="big-delta ' + (low ? "text-bad" : "text-good") + '">' + (low ? "UNREST" : "STABLE") + "</span>" +
+      '<span class="big-value">' + formatStability(current) + "</span>" +
+      '<span class="big-delta ' + trendClass + '">' + trend + "</span>" +
     "</div>"
   );
+
+  const unrestChance = getUnrestChance(current);
+  const unrestState = state.events || {};
+  const lastUnrest = unrestState.lastUnrestId ? getUnrestEventById(unrestState.lastUnrestId) : null;
   parts.push('<div class="sheet-section"><h3>STABILITY EFFECTS</h3>');
-  parts.push(breakdownRow("Below 30", "All production −25%", { className: low ? "multiplier" : "" }));
+  parts.push(breakdownRow("Unrest chance", formatAmount(unrestChance * 100) + "% / turn", {
+    sub: "0% at 100 · rises as the bar falls",
+    amountClass: unrestChance >= 0.3 ? "text-bad" : unrestChance >= 0.12 ? "text-gold" : ""
+  }));
+  parts.push(breakdownRow("Last unrest", lastUnrest ? "Turn " + unrestState.lastUnrestTurn : "None yet", {
+    sub: lastUnrest
+      ? lastUnrest.title + (unrestState.lastUnrestColony ? " · " + unrestState.lastUnrestColony : "")
+      : "No civil disorder has broken out"
+  }));
   parts.push(breakdownRow("At 0", "Rebellion — game over", {}));
-  parts.push(breakdownRow("Restore stability", "Event choices only", { sub: "There is no passive recovery." }));
   parts.push("</div>");
 
-  parts.push('<div class="sheet-section"><h3>PER-TURN PRESSURE</h3>');
-  const deficitSectors = getSectorsInDeficit();
+  parts.push('<div class="sheet-section"><h3>EMPIRE MOOD</h3>');
+  parts.push(breakdownRow("Colony happiness H̄", targetText === null ? "—" : targetText + "%", {
+    sub: targetText === null
+      ? "No colony population, so the bar holds its value"
+      : "Weighted over " + projection.targetPopulation + " " + (projection.targetPopulation === 1 ? "person" : "people") +
+        " in " + projection.targetColonies + (projection.targetColonies === 1 ? " colony" : " colonies")
+  }));
+  parts.push(signedBreakdownRow(
+    "Drag toward H̄",
+    projection.blend - current,
+    targetText === null
+      ? "No colonies to pull the average"
+      : cfg.drag.toFixed(1) + " × " + formatAmount(current) + " + " + cfg.weight.toFixed(1) + " × " + targetText + " = " + formatAmount(projection.blend)
+  ));
   const deficitSub = deficitSectors.length
     ? "Short on infrastructure upkeep: " + deficitSectors.map(function (sector) { return sector.name; }).join(", ")
-    : "Applies while a sector cannot cover its infrastructure upkeep";
-  parts.push(
-    signedBreakdownRow(
-      "Unpaid sector infrastructure upkeep",
-      -CONFIG.stability.energyDeficitPenalty,
-      deficitSub
-    )
-  );
+    : "Every sector covered its infrastructure upkeep";
+  parts.push(signedBreakdownRow("Infrastructure shortfall", -projection.penalty, deficitSub));
+  parts.push(breakdownRow("Next turn", formatAmount(projection.next), {
+    className: "total",
+    amountClass: change > 0.05 ? "text-good" : change < -0.05 ? "text-bad" : "",
+    sub: projection.penalty > 0
+      ? "After the " + projection.penalty + " point penalty · before raids and battles"
+      : "Before this turn's raids and battles"
+  }));
   parts.push("</div>");
-  parts.push('<p class="sheet-note">Production is recalculated immediately after every event or action. When stability falls below 30, all resource production is reduced by 25%. Population maintenance never pushes a ledger negative; a colony that cannot fund it loses happiness and growth instead. The stability penalty is charged once per turn no matter how many sectors are short on infrastructure upkeep.</p>');
+
+  if (projection.contributions.length) {
+    parts.push('<div class="sheet-section"><h3>COLONY PRESSURE</h3>');
+    const sorted = projection.contributions.slice().sort(function (a, b) {
+      return b.population - a.population;
+    });
+    sorted.forEach(function (entry) {
+      parts.push(breakdownRow(entry.name || "Colony", formatStability(entry.happiness) + "%", {
+        sub: entry.population + (entry.population === 1 ? " person" : " people") +
+          " · " + Math.round(entry.share * 100) + "% of the weight"
+      }));
+    });
+    parts.push("</div>");
+  }
+
+  parts.push('<p class="sheet-note">Stability is a moving average, not an independent clock. Each turn the bar keeps ' +
+    Math.round(cfg.drag * 100) + '% of its value and takes ' + Math.round(cfg.weight * 100) +
+    '% of H̄, the happiness of every colony weighted by its population: a 20-person world pulls four times as hard as a 5-person one. ' +
+    'Event choices, raids and an unpaid infrastructure bill are applied on top, so a shock fades over the following turns. ' +
+    'Low stability does not touch production: at the end of each turn it rolls for a civil-unrest card — a riot, strike or protest that asks for a response — with a chance of 0% at 100 and rising as the bar falls. At 0 the run ends in rebellion.</p>');
   return parts.join("");
 }
 
@@ -834,18 +889,13 @@ function planetDetailsHTML(system) {
   parts.push("</div>");
 
   parts.push('<div class="sheet-section"><h3>EMPIRE MODIFIERS</h3>');
-  parts.push(breakdownRow("Empire stability", state.stability + " / 100", {
-    sub: state.stability < CONFIG.stability.lowThreshold ? "Unrest: ×0.75 production" : "No stability penalty"
+  parts.push(breakdownRow("Empire stability", formatStability(state.stability) + " / 100", {
+    sub: "Unrest: " + formatAmount(getUnrestChance(state.stability) * 100) + "% chance per turn"
   }));
   const ethic = getEthic();
   if (ethic) {
     if (ethic.mineralMult) parts.push(breakdownRow(ethic.name + " doctrine", "+10% minerals", {}));
     if (ethic.researchMult) parts.push(breakdownRow(ethic.name + " doctrine", "+10% research", {}));
-  }
-  if (econ.instability) {
-    parts.push(breakdownRow("Unrest penalty", "×0.75 all production", { className: "multiplier" }));
-  } else {
-    parts.push(breakdownRow("Unrest penalty", "None", {}));
   }
   parts.push("</div>");
 

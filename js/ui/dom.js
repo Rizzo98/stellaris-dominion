@@ -166,7 +166,7 @@ function deltaClass(value) {
 }
 
 function renderEffectPills(effects) {
-  const order = ["energy", "minerals", "research", "influence", "stability"];
+  const order = ["energy", "minerals", "research", "influence", "stability", "population"];
   const parts = [];
   order.forEach(function (key) {
     const value = effects[key];

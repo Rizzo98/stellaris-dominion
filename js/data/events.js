@@ -41,6 +41,16 @@ const EVENT_CATEGORIES = {
     emoji: "⚠️",
     blurb: "Raiders, stellar weather and other bad news.",
     weightMult: 1
+  },
+  /* Unrest is a category for the card chip only. These cards are drawn by the
+     stability system (see core/event-engine.js) and never from the paced
+     deck, so the category is not in EVENT_CATEGORY_ORDER or EVENT_BUCKETS. */
+  unrest: {
+    id: "unrest",
+    name: "Unrest",
+    emoji: "🔥",
+    blurb: "Riots, strikes and civil disorder.",
+    weightMult: 1
   }
 };
 const EVENT_CATEGORY_ORDER = ["discovery", "contact", "economy", "hazard"];
@@ -175,3 +185,93 @@ const EVENT_BUCKETS = {
   economy: ["mineralVein"],
   hazard: ["pirateRaiders", "solarFlare"]
 };
+
+/* Civil unrest. These cards are not in any encounter bucket: the stability
+   system rolls for one at the end of a turn and the chance is 0 at 100
+   stability. They use the same card shape as EVENTS, the {colony} token is
+   replaced with the unhappiest colony's name, and energy/minerals hit that
+   colony's sector. weight is the card's relative chance inside the pool. */
+const UNREST_EVENTS = [
+  {
+    id: "breadRiot",
+    title: "Bread Riot",
+    emoji: "🍞",
+    kicker: "CIVIL DISORDER",
+    category: "unrest",
+    weight: 12,
+    text: "Hungry crowds have broken into the ration depots of {colony}. The quarter is barricaded and the wardens have withdrawn.",
+    choices: [
+      { label: "Open the emergency stores", tag: "Compassion", effects: { energy: -6, stability: 4 } },
+      { label: "Send in the wardens", tag: "Crackdown", effects: { stability: -3, influence: 1 } },
+      { label: "Let the crowds disperse", tag: "Passive", effects: { stability: -1, minerals: -2 } }
+    ]
+  },
+  {
+    id: "generalStrike",
+    title: "General Strike",
+    emoji: "✊",
+    kicker: "LABOUR DISPUTE",
+    category: "unrest",
+    weight: 10,
+    text: "The dockworkers of {colony} have walked out. Cargo sits on the pads and the grid runs on skeleton crews.",
+    choices: [
+      { label: "Concede a maintenance raise", tag: "Conciliatory", effects: { energy: -5, stability: 5 } },
+      { label: "Break the strike", tag: "Hardline", effects: { stability: -4, minerals: 3 } }
+    ]
+  },
+  {
+    id: "protestMarch",
+    title: "Protest March",
+    emoji: "📣",
+    kicker: "MASS DEMONSTRATION",
+    category: "unrest",
+    weight: 11,
+    text: "A column of demonstrators fills the avenues of {colony}, demanding the governor's resignation.",
+    choices: [
+      { label: "Address the crowd", tag: "Diplomatic", effects: { influence: -3, stability: 4 } },
+      { label: "Disperse the march", tag: "Crackdown", effects: { stability: -5, energy: -2 } },
+      { label: "Let the march pass", tag: "Passive", effects: { stability: -2 } }
+    ]
+  },
+  {
+    id: "sabotage",
+    title: "Sabotage",
+    emoji: "🔧",
+    kicker: "INDUSTRIAL SABOTAGE",
+    category: "unrest",
+    weight: 8,
+    text: "Someone has cut the coolant lines in {colony}'s power ring. The grid is down and the saboteurs are still at large.",
+    choices: [
+      { label: "Repair the ring", tag: "Practical", effects: { minerals: -5, energy: -2, stability: 1 } },
+      { label: "Blame the agitators", tag: "Populist", effects: { stability: -4, influence: 2 } }
+    ]
+  },
+  {
+    id: "emigration",
+    title: "Emigration Wave",
+    emoji: "🧳",
+    kicker: "MASS DEPARTURE",
+    category: "unrest",
+    weight: 9,
+    text: "Families are queueing at the starport of {colony}. They have sold what they own and want passage off-world.",
+    choices: [
+      { label: "Offer land grants", tag: "Conciliatory", effects: { energy: -4, minerals: -3, stability: 3 } },
+      { label: "Let them go", tag: "Pragmatic", effects: { population: -1, stability: -1 } },
+      { label: "Close the port", tag: "Hardline", effects: { stability: -4 } }
+    ]
+  },
+  {
+    id: "nightLooting",
+    title: "Night of Looting",
+    emoji: "🏚️",
+    kicker: "CIVIL DISORDER",
+    category: "unrest",
+    weight: 9,
+    text: "The market districts of {colony} are dark. Looters stripped the stores before the patrols could close the streets.",
+    choices: [
+      { label: "Repay the merchants", tag: "Restorative", effects: { minerals: -6, stability: 3 } },
+      { label: "Declare a curfew", tag: "Authoritarian", effects: { stability: -2, influence: 2 } },
+      { label: "Seize the black market", tag: "Opportunist", effects: { minerals: 4, stability: -3 } }
+    ]
+  }
+];

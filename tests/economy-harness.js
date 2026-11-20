@@ -494,7 +494,8 @@ function testTurnPipeline() {
     "the third sector's minerals are untouched");
   eq(run("state.resources.research"), 6, "research from every sector lands in the shared stockpile");
   eq(run("state.resources.influence"), 6, "influence lands in the shared stockpile");
-  eq(run("state.stability"), 70, "no sector was in deficit, so stability holds");
+  near(run("state.stability"), 49, 1e-9,
+    "the unfunded fixture colonies pull stability from 70 toward their 0% happiness");
   const center = run("getStructureAt(1,1,'sec-core')");
   eq(center.lastTrade.energy, 2, "the trade center shipped 2 energy");
   eq(center.lastTrade.minerals, 3, "the trade center shipped 3 minerals");
@@ -549,8 +550,8 @@ function testDeficitPenalty() {
   run("addColony('deficit-b', " + JSON.stringify(neighbors[1]) + ", { population: 5 })");
   run("state.stability = CONFIG.stability.start; state.phase = 'actions';");
   run("endTurn()");
-  eq(run("state.stability"), 68,
-    "any number of deficit sectors costs the stability penalty once, not per sector");
+  near(run("state.stability"), 47, 1e-9,
+    "the mood blend plus one infrastructure penalty, not one per deficit sector");
   eq(run("getSectorStock(" + JSON.stringify(neighbors[0]) + ", 'energy')"), 0,
     "an unpaid infrastructure bill stops at zero, never negative");
   eq(run("getSectorStock(" + JSON.stringify(neighbors[1]) + ", 'energy')"), 0,

@@ -134,7 +134,9 @@ function resolveEvent(choiceIndex) {
   state.currentEvent = null;
   hideEventLayer();
   state.phase = "actions";
-  applyEffects(choice.effects);
+  /* Unrest cards carry the sector of the colony they broke out in, so their
+     energy, minerals and population effects land there. */
+  applyEffects(choice.effects, event.sectorId);
   state.ui.eventResolving = false;
   if (state.phase === "ended") return;
   if (state.stability <= 0) {
