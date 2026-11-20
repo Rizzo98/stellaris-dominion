@@ -35,6 +35,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",
@@ -141,11 +142,8 @@ function createContext() {
 
     function addColony(id, sectorId, opts) {
       const options = opts || {};
-      const population = options.population == null ? 1 : options.population;
-      const baseHousing = options.home ? CONFIG.population.homeBaseCap : CONFIG.population.colonyBaseCap;
-      /* A fixture population above its founding shelter needs the housing
-         upkeep that would pay for the extra houses. */
-      const paidHouses = Math.max(0, population - baseHousing);
+      const population = options.population == null ? 5 : options.population;
+      const maintenance = options.maintenance || { energy: 0, minerals: 0 };
       const system = {
         id: id,
         sectorId: sectorId,
@@ -156,10 +154,12 @@ function createContext() {
         bonusSlots: 0,
         unlockedBonusSlots: 0,
         population: population,
-        populationUpkeep: {
-          housing: paidHouses * getPopulationHousingUpkeepStep(),
-          sustenance: 0
+        maintenance: {
+          energy: maintenance.energy,
+          minerals: maintenance.minerals
         },
+        workerOrders: {},
+        economyReport: null,
         growthProgress: 0,
         foundedTurn: 1,
         emoji: "🪐",
@@ -172,7 +172,7 @@ function createContext() {
       system.slots = createPlanetSlots(system);
       (options.buildings || []).forEach(function (type, index) {
         if (!type) return;
-        system.slots[index] = { type: type, underConstruction: false };
+        system.slots[index] = { type: type, level: 1, underConstruction: false };
       });
       state.systems.push(system);
       return system;
@@ -247,10 +247,28 @@ function testStartingLedgers() {
   eq(run("state.resources.minerals"), undefined, "minerals no longer live in the empire stockpile");
 
   const display = run("getDisplayResources()");
-  eq(display.energy, 10, "the topbar snapshot reads the current sector's energy");
-  eq(display.minerals, 10, "the topbar snapshot reads the current sector's minerals");
+  eq(display.energy, run("CONFIG.startingResources.energy"),
+    "the topbar snapshot reads the current sector's energy");
+  eq(display.minerals, run("CONFIG.startingResources.minerals"),
+    "the topbar snapshot reads the current sector's minerals");
   eq(display.research, 0, "the topbar snapshot reads the global research");
   eq(display.influence, 5, "the topbar snapshot reads the global influence");
+
+  const homeSystem = run("state.systems.find(function (system) { return system.home; })");
+  eq(homeSystem.population, 3, "the capital starts at 3 population");
+  eq(homeSystem.slots[0].type, "power", "the capital starts with a Power Plant");
+  eq(homeSystem.slots[1].type, "mine", "the capital starts with a Mine");
+  eq(homeSystem.slots[0].underConstruction, false, "the starter Power Plant is online");
+  eq(homeSystem.slots[1].underConstruction, false, "the starter Mine is built");
+
+  eq(run("CONFIG.startingResources.energy"), 15, "the home sector starts with 15 energy");
+  eq(run("CONFIG.startingResources.minerals"), 15, "the home sector starts with 15 minerals");
+
+  const homeEcon = run("getSectorEconomy('sec-core')");
+  eq(homeEcon.income.energy, 8, "the capital earns base energy plus a 2-worker Power Plant");
+  eq(homeEcon.income.minerals, 6, "the capital earns base minerals plus a 1-worker Mine");
+  ok(homeEcon.net.energy > 0, "the opening energy bill is covered");
+  ok(homeEcon.net.minerals > 0, "the opening mineral bill is covered");
 }
 
 /* ---------- sector economies ---------- */
@@ -261,29 +279,32 @@ function setupThreeSectors() {
   const neighbors = run("getSector('sec-core').neighbors.slice()");
   const aId = neighbors[0];
   const bId = neighbors[1] || neighbors[0];
-  run("addColony('home-test', 'sec-core', { home: true, population: 3, buildings: ['power', 'mine', 'lab'] })");
-  run("addColony('colony-a', " + JSON.stringify(aId) + ", { population: 2, buildings: ['mine', 'lab'] })");
-  run("addColony('colony-b', " + JSON.stringify(bId) + ", { population: 1, buildings: ['lab'] })");
+  run("addColony('home-test', 'sec-core', { home: true, population: 12, buildings: ['power', 'mine', 'lab'] })");
+  run("addColony('colony-a', " + JSON.stringify(aId) + ", { population: 10, buildings: ['mine', 'lab'] })");
+  run("addColony('colony-b', " + JSON.stringify(bId) + ", { population: 8, buildings: ['lab'] })");
   run("setAllStocks(10, 10)");
   return { homeId: homeId, aId: aId, bId: bId };
 }
 
 function testSectorEconomies() {
   const ids = setupThreeSectors();
+  eq(run("CONFIG.startingResources.energy"), 15, "the home sector starts with 15 energy");
+  eq(run("CONFIG.startingResources.minerals"), 15, "the home sector starts with 15 minerals");
+
   const homeEcon = run("getSectorEconomy('sec-core')");
-  eq(homeEcon.income.energy, 6, "the capital sector earns base + power plant energy");
-  eq(homeEcon.income.minerals, 5, "the capital sector earns base + mine minerals");
-  eq(homeEcon.income.research, 0, "the idle capital lab produces no research");
-  eq(homeEcon.upkeep, 3, "the capital sector pays colony, mine and lab upkeep");
-  eq(homeEcon.net.energy, 3, "the capital sector nets energy after its own upkeep");
+  eq(homeEcon.income.energy, 12, "the capital sector earns base + power plant energy");
+  eq(homeEcon.income.minerals, 12, "the capital sector earns base + mine minerals");
+  eq(homeEcon.income.research, 2, "the capital lab produces research at 12 population");
+  eq(homeEcon.upkeep, 2, "the capital sector pays colony and lab upkeep (facilities draw no energy)");
+  eq(homeEcon.net.energy, 10, "the capital sector nets energy after its own upkeep");
 
   const aEcon = run("getSectorEconomy(" + JSON.stringify(ids.aId) + ")");
-  eq(aEcon.income.minerals, 3, "the frontier colony keeps its own mine income");
+  eq(aEcon.income.minerals, 8, "the frontier colony keeps its own level 1 mine income");
   eq(aEcon.income.energy, 0, "a colony without a power plant earns no energy");
-  eq(aEcon.upkeep, 3, "the frontier sector pays its own colony and building upkeep");
-  eq(aEcon.net.energy, -3, "the frontier sector can run an energy deficit alone");
-  eq(aEcon.net.minerals, 1, "the frontier sector banks its minerals after paying housing upkeep");
-  eq(aEcon.mineralUpkeep, 2, "the frontier colony pays 2 minerals for its second house");
+  eq(aEcon.upkeep, 2, "the frontier sector pays its own colony and lab upkeep");
+  eq(aEcon.net.energy, -2, "the frontier sector can run an energy deficit alone");
+  eq(aEcon.net.minerals, 8, "the frontier sector banks its minerals (fixture maintenance is zero)");
+  eq(aEcon.mineralUpkeep, 0, "the fixture requests no population housing by default");
 
   const bEcon = run("getSectorEconomy(" + JSON.stringify(ids.bId) + ")");
   eq(bEcon.income.research, 2, "a lab feeds the shared research pool");
@@ -291,11 +312,13 @@ function testSectorEconomies() {
   eq(bEcon.net.energy, -2, "the third sector's energy is local too");
 
   const econ = run("getEconomy()");
-  eq(econ.income.energy, 6, "empire energy income is the sum of every sector");
-  eq(econ.income.minerals, 8, "empire mineral income is the sum of every sector");
-  eq(econ.income.research, 2, "empire research is the sum of every sector's labs");
-  eq(econ.netEnergy, -2, "empire net energy sums the sector nets");
-  eq(econ.netMinerals, 6, "empire net minerals sums the sector nets after housing upkeep");
+  eq(econ.income.energy, 12, "empire energy income is the sum of every sector");
+  eq(econ.income.minerals, 20, "empire mineral income is the sum of every sector");
+  eq(econ.income.research, 6, "empire research is the sum of every sector's labs");
+  eq(econ.netEnergy, 6, "empire net energy sums the sector nets");
+  eq(econ.netMinerals, 20, "empire net minerals sums the sector nets");
+  eq(econ.populationMaintenance.energyRequested, 0,
+    "the fixture maintenance policy requests no population upkeep");
   eq(run("state.resources.research"), 0, "sector production is not banked in a global mineral/energy pool");
 
   run("setSectorStock(" + JSON.stringify(ids.aId) + ", 'minerals', 0)");
@@ -311,10 +334,10 @@ function testSectorEconomies() {
 
 function testLocalCosts() {
   run("resetEconomy()");
-  const home = run("addColony('home-test', 'sec-core', { home: true, population: 3 })");
+  const home = run("addColony('home-test', 'sec-core', { home: true, population: 12 })");
   const neighbors = run("getSector('sec-core').neighbors.slice()");
   const aId = neighbors[0];
-  run("addColony('frontier-a', " + JSON.stringify(aId) + ", { population: 1 })");
+  run("addColony('frontier-a', " + JSON.stringify(aId) + ", { population: 5 })");
   run("setSectorStock('sec-core', 'minerals', 20); setSectorStock('sec-core', 'energy', 5);");
   run("setSectorStock(" + JSON.stringify(aId) + ", 'minerals', 0)");
 
@@ -458,18 +481,18 @@ function testTurnPipeline() {
 
   run("endTurn()");
   eq(run("state.turn"), 2, "the turn advances");
-  eq(run("getSectorStock('sec-core', 'energy')"), 10,
-    "the capital pays upkeep (including the trade center) then earns and ships energy");
-  eq(run("getSectorStock('sec-core', 'minerals')"), 12, "the capital earns 5 and ships 3 minerals");
-  eq(run("getSectorStock(" + JSON.stringify(ids.aId) + ", 'energy')"), 9,
-    "the target sector pays its upkeep then receives 2 energy");
-  eq(run("getSectorStock(" + JSON.stringify(ids.aId) + ", 'minerals')"), 14,
-    "the target sector pays housing upkeep, keeps its 3 mined minerals and receives 3");
+  eq(run("getSectorStock('sec-core', 'energy')"), 17,
+    "the capital pays infrastructure, earns 12, and ships 2 energy");
+  eq(run("getSectorStock('sec-core', 'minerals')"), 19, "the capital earns 12 and ships 3 minerals");
+  eq(run("getSectorStock(" + JSON.stringify(ids.aId) + ", 'energy')"), 10,
+    "the target sector pays 2 energy upkeep, then receives 2 energy");
+  eq(run("getSectorStock(" + JSON.stringify(ids.aId) + ", 'minerals')"), 21,
+    "the target sector keeps its 8 mined minerals and receives 3");
   eq(run("getSectorStock(" + JSON.stringify(ids.bId) + ", 'energy')"), 8,
-    "the third sector pays its own upkeep from its own stock");
+    "the third sector pays its own 2 energy upkeep from its own stock");
   eq(run("getSectorStock(" + JSON.stringify(ids.bId) + ", 'minerals')"), 10,
     "the third sector's minerals are untouched");
-  eq(run("state.resources.research"), 2, "research from every sector lands in the shared stockpile");
+  eq(run("state.resources.research"), 6, "research from every sector lands in the shared stockpile");
   eq(run("state.resources.influence"), 6, "influence lands in the shared stockpile");
   eq(run("state.stability"), 70, "no sector was in deficit, so stability holds");
   const center = run("getStructureAt(1,1,'sec-core')");
@@ -478,21 +501,60 @@ function testTurnPipeline() {
   eq(center.lastTrade.status, "shipped", "the turn resolved the route");
 }
 
+/* ---------- population maintenance in the real turn pipeline ---------- */
+
+function testMaintenanceTurnOrder() {
+  run("resetEconomy()");
+  const system = run("addColony('maint-colony', 'sec-core', { population: 10, maintenance: { energy: 100, minerals: 100 } })");
+  run("setSectorStock('sec-core', 'energy', 20); setSectorStock('sec-core', 'minerals', 20);");
+  run("state.phase = 'actions'; state.currentEvent = null; state.turn = 1;");
+  run("endTurn()");
+
+  const energyRequired = Math.pow(10, 1.1);
+  const mineralsRequired = Math.pow(10, 1 / 0.9);
+  eq(run("state.turn"), 2, "the maintenance turn advances");
+  near(run("getSectorStock('sec-core', 'energy')"), 20 - energyRequired - 1, 1e-6,
+    "population energy is paid first, then the colony overhead");
+  near(run("getSectorStock('sec-core', 'minerals')"), 20 - mineralsRequired, 1e-6,
+    "housing is paid from the mineral ledger");
+  eq(run("state.lastMaintenance.colonies"), 1, "the turn records the resolved maintenance");
+  near(run("state.lastMaintenance.energySpent"), energyRequired, 1e-6,
+    "the resolved energy spend matches the formula");
+  near(run("state.lastMaintenance.mineralsSpent"), mineralsRequired, 1e-6,
+    "the resolved housing spend matches the formula");
+  eq(run("getColonyPopulation(getSystem('maint-colony'))"), 10,
+    "no whole person arrives on the first 0.5-growth tick");
+  near(run("getSystem('maint-colony').growthProgress"), 0.5, 1e-9,
+    "the growth fraction is banked after maintenance");
+  eq(run("Math.round(state.lastMaintenance.happiness)"), 100,
+    "full maintenance resolves to full happiness");
+  ok(run("getSectorStock('sec-core', 'energy') >= 0 && getSectorStock('sec-core', 'minerals') >= 0"),
+    "the turn pipeline leaves no negative ledger");
+
+  run("state.phase = 'actions'; state.currentEvent = null;");
+  run("setSectorStock('sec-core', 'energy', 20); setSectorStock('sec-core', 'minerals', 20);");
+  run("endTurn()");
+  eq(run("getColonyPopulation(getSystem('maint-colony'))"), 11,
+    "the second 0.5 tick completes the population");
+  eq(run("getSystem('maint-colony').growthProgress"), 0,
+    "the banked fraction is consumed");
+}
+
 /* ---------- deficit penalty ---------- */
 
 function testDeficitPenalty() {
   run("resetEconomy()");
   const neighbors = run("getSector('sec-core').neighbors.slice(0, 2)");
-  run("addColony('deficit-a', " + JSON.stringify(neighbors[0]) + ", { population: 1 })");
-  run("addColony('deficit-b', " + JSON.stringify(neighbors[1]) + ", { population: 1 })");
+  run("addColony('deficit-a', " + JSON.stringify(neighbors[0]) + ", { population: 5 })");
+  run("addColony('deficit-b', " + JSON.stringify(neighbors[1]) + ", { population: 5 })");
   run("state.stability = CONFIG.stability.start; state.phase = 'actions';");
   run("endTurn()");
   eq(run("state.stability"), 68,
     "any number of deficit sectors costs the stability penalty once, not per sector");
-  eq(run("getSectorStock(" + JSON.stringify(neighbors[0]) + ", 'energy')"), -1,
-    "the first deficit stays in its own sector ledger");
-  eq(run("getSectorStock(" + JSON.stringify(neighbors[1]) + ", 'energy')"), -1,
-    "the second deficit stays in its own sector ledger");
+  eq(run("getSectorStock(" + JSON.stringify(neighbors[0]) + ", 'energy')"), 0,
+    "an unpaid infrastructure bill stops at zero, never negative");
+  eq(run("getSectorStock(" + JSON.stringify(neighbors[1]) + ", 'energy')"), 0,
+    "the second deficit also stops at zero");
   eq(run("getSectorStock('sec-core', 'energy')"), 0,
     "a sector in balance is not dragged down by another sector's deficit");
 }
@@ -576,6 +638,7 @@ try {
   testTradeGateAndReach();
   testTradeTransfersAndUpkeep();
   testTurnPipeline();
+  testMaintenanceTurnOrder();
   testDeficitPenalty();
   testSectorEffects();
   testTradingCenterBuild();

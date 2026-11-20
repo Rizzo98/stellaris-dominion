@@ -1,8 +1,8 @@
 /* ============================================================
    SHEET CONTENT — HTML bodies for the bottom sheet
-   Resource details, stability, building picker, the population menu (housing
-   and sustenance upkeep steppers), planet details, the event deck and the
-   rival dossier.
+   Resource details, stability, building picker, the population menu (energy
+   maintenance and housing investment steppers), planet details, the event
+   deck and the rival dossier.
    ============================================================ */
 
 /* Encounter deck inspector. Read-only: it shows the live cadence, category
@@ -327,10 +327,10 @@ function resourceSheetHTML(type) {
 
   if (isEnergy) {
     parts.push('<p class="sheet-note">Energy is local to ' + (sector ? sector.name : "this sector") +
-      '. Upkeep is paid from this ledger when you end the turn: colony overhead, population sustenance, every completed building (staffed or not), online strongholds and trading centers, and the research directorate if this is the capital sector. If this sector is in the red after upkeep, stability drops by 2 that turn. Production happens at the start of each new turn.</p>');
+      '. Population maintenance is paid first and can never overdraw the ledger: the colony buys what the stock covers and loses fulfillment instead. Infrastructure upkeep (colony overhead, completed buildings, online orbitals, the research directorate) is paid from what remains; a sector that cannot cover that bill loses 2 stability that turn. Production happens at the start of each new turn.</p>');
   } else if (isMinerals) {
     parts.push('<p class="sheet-note">Minerals are local to ' + (sector ? sector.name : "this sector") +
-      '. Building, ship, structure and colonisation costs are paid from the sector where the work happens, and population housing is a standing mineral upkeep here. If this sector is in the red after upkeep, stability drops by 2 that turn. A frontier world must be supplied by a trading center. Raids loot and battles salvage in the sector they happen in.</p>');
+      '. Population housing investment is paid first, proportional to the stock, and never overdraws the ledger. Building, ship, structure and colonisation costs are paid from the sector where the work happens. A colony that cannot fund its housing loses happiness and growth, not stability. A frontier world must be supplied by a trading center. Raids loot and battles salvage in the sector they happen in.</p>');
   } else if (isResearch) {
     if (state.tech.active) {
       parts.push('<p class="sheet-note">Research is empire-wide: every Lab in every sector feeds this stockpile. It is automatically invested in ' + TECHS[state.tech.active].name + '. The project draws ' + getTechEnergyUpkeep(state.tech.active) + ' energy upkeep from the capital sector each turn. The stockpile above is overflow waiting for the next project.</p>');
@@ -363,17 +363,17 @@ function stabilitySheetHTML() {
   parts.push('<div class="sheet-section"><h3>PER-TURN PRESSURE</h3>');
   const deficitSectors = getSectorsInDeficit();
   const deficitSub = deficitSectors.length
-    ? "In deficit: " + deficitSectors.map(function (sector) { return sector.name; }).join(", ")
-    : "Applies while any sector's energy or minerals are below 0 after upkeep";
+    ? "Short on infrastructure upkeep: " + deficitSectors.map(function (sector) { return sector.name; }).join(", ")
+    : "Applies while a sector cannot cover its infrastructure upkeep";
   parts.push(
     signedBreakdownRow(
-      "Negative sector balance after upkeep",
+      "Unpaid sector infrastructure upkeep",
       -CONFIG.stability.energyDeficitPenalty,
       deficitSub
     )
   );
   parts.push("</div>");
-  parts.push('<p class="sheet-note">Production is recalculated immediately after every event or action. When stability falls below 30, all resource production is reduced by 25%. A sector that cannot pay its population housing or sustenance can fall into a mineral or energy deficit; the penalty is charged once per turn no matter how many sectors are short.</p>');
+  parts.push('<p class="sheet-note">Production is recalculated immediately after every event or action. When stability falls below 30, all resource production is reduced by 25%. Population maintenance never pushes a ledger negative; a colony that cannot fund it loses happiness and growth instead. The stability penalty is charged once per turn no matter how many sectors are short on infrastructure upkeep.</p>');
   return parts.join("");
 }
 
@@ -388,43 +388,41 @@ function buildSheetHTML(system, slotIndex) {
       ' ⛏ held. Minerals are local to the sector; move them with a trading center.</span></div>'
   );
   parts.push(
-    '<div class="slot-lock-note"><span>👥</span><span>Population ' + workforce.population + ' / ' + workforce.cap +
+    '<div class="slot-lock-note"><span>👥</span><span>Population ' + workforce.population +
     ' · ' + workforce.jobsStaffed + ' / ' + workforce.jobsTotal + ' posts staffed · ' + workforce.availableWorkers +
     ' free ' + (workforce.availableWorkers === 1 ? "worker" : "workers") +
-    '. Workers are assigned in slot order.</span></div>'
+    '. Facilities need a minimum colony population before they can operate; automatic crews use the selected strategy (round robin by default) until you pin them with the − / + buttons.</span></div>'
   );
   parts.push(
-    '<div class="slot-lock-note"><span>🏗</span><span>Construction completes when you end the turn. You can build without free workers: the building still pays its energy upkeep, but produces nothing until staffed.</span></div>'
+    '<div class="slot-lock-note"><span>🏗</span><span>Construction completes when you end the turn. You can build without free workers: the building produces nothing until staffed.</span></div>'
   );
   parts.push('<div class="build-list">');
   BUILDING_ORDER.forEach(function (type) {
     const def = BUILDINGS[type];
     const cost = def.cost.minerals;
-    const workers = getBuildingWorkers(type);
-    const canAfford = currentMinerals >= cost;
-    const freeWorkers = workforce.availableWorkers;
-    const canStaff = workers === 0 || freeWorkers >= workers;
-    const short = Math.max(0, cost - currentMinerals);
-    const workforceLine = workers > 0
-      ? (canStaff
-          ? "needs " + workers + (workers === 1 ? " worker" : " workers") + " · ready"
-          : freeWorkers > 0
-            ? '<span class="text-bad">only ' + freeWorkers + " free</span> · needs " + workers + (workers === 1 ? " worker" : " workers")
-            : '<span class="text-bad">no free workers now</span> · needs ' + workers + (workers === 1 ? " worker" : " workers"))
-      : "needs no workers";
     /* A building is laid down at the highest level the tech tree has
        unlocked. A building that predates the tech keeps its old level until
        it is refitted from its slot. */
     const unlockedLevel = getBuildingUnlockedLevel(type);
-    const levelLine = unlockedLevel > 1
-      ? " · builds at LVL " + unlockedLevel
-      : " · builds at LVL 1";
+    const workers = getBuildingWorkers(type, unlockedLevel);
+    const minPopulation = getBuildingMinPopulation(type, unlockedLevel);
+    const canAfford = currentMinerals >= cost;
+    const short = Math.max(0, cost - currentMinerals);
+    const crewNow = workforce.availableWorkers;
+    const workforceLine = workers > 0
+      ? ("needs " + workers + (workers === 1 ? " worker" : " workers") +
+         (minPopulation ? " · colony " + minPopulation + "+" : "") +
+         (crewNow >= workers ? " · crew ready" : " · " + crewNow + " free now"))
+      : "needs no workers";
+    const levelName = getBuildingLevelName(type, unlockedLevel);
+    const levelLine = " · builds at LVL " + unlockedLevel +
+      (levelName ? " (" + levelName + ")" : "");
     parts.push(
       '<button class="build-option ' + (canAfford ? "" : "short") + '" data-build="' + type + '"' + (canAfford ? "" : " disabled") + ">" +
         '<span class="b-emoji" aria-hidden="true">' + def.emoji + "</span>" +
         '<span class="b-main">' +
           '<span class="b-name">' + def.name + "</span>" +
-          '<span class="b-yield">' + buildingYieldText(type) + "</span>" +
+          '<span class="b-yield">' + buildingYieldText(type, unlockedLevel) + "</span>" +
           '<span class="b-yield">' + def.desc + " · " + workforceLine + " · 1 turn" + levelLine + "</span>" +
         "</span>" +
         '<span class="b-cost">' + cost + " ⛏" +
@@ -434,28 +432,29 @@ function buildSheetHTML(system, slotIndex) {
     );
   });
   parts.push("</div>");
-  parts.push('<p class="sheet-note">You can construct in every open slot this turn, with or without free workers. Completed buildings always pay energy upkeep. Output scales with staffing: 1 of 2 mine workers is 50%. Workers are assigned in slot order, so earlier slots are staffed first. A new building is laid down at the level your Building category techs have unlocked; a building that was already standing keeps its old level until you refit it from its slot for half its build cost. Housing is not a building: open the population card to fund houses with minerals and sustenance with energy.</p>');
+  parts.push('<p class="sheet-note">You can construct in every open slot this turn, with or without free workers. Completed buildings always pay energy upkeep. Output scales with staffing: a half crew produces half the facility output. Workers follow the selected automatic strategy until you pin a crew on the colony screen; a pinned crew stays exactly where you put it. A new building is laid down at the level your Building category techs have unlocked; a building that was already standing keeps its old level until you refit it from its slot for half its build cost. Housing is not a building: open the population card to fund energy maintenance and housing investment as percentages of the full requirement.</p>');
   return parts.join("");
 }
 
-/* ---------- population menu ---------- */
+/* ---------- population / maintenance menu ---------- */
 
-/* One stepper row. The − and + labels are disabled with an explanatory
-   title when the move is illegal: at the bound, or a housing cut that would
-   leave more people than houses. */
-function populationUpkeepRow(system, axis, policy, bounds) {
-  const isHousing = axis === "housing";
-  const step = isHousing ? getPopulationHousingUpkeepStep() : 1;
-  const sustCfg = getPopulationSustenanceConfig();
-  const value = policy[axis];
-  const max = bounds[axis];
-  const minusReason = getPopulationUpkeepChangeReason(system, axis, -1);
-  const plusReason = getPopulationUpkeepChangeReason(system, axis, 1);
-  const icon = isHousing ? "⛏" : "⚡";
-  const label = isHousing ? "Housing upkeep" : "Sustenance upkeep";
-  const sub = isHousing
-    ? step + " ⛏ / turn buys 1 house · max " + (max / step) + " extra"
-    : "1 ⚡ / turn feeds " + sustCfg.populationPerEnergy + " pop · max " + max + " (full planet)";
+/* One policy stepper. The value is a percentage of the full requirement;
+   the sub-line reports the actual energy or housing that share buys at this
+   colony's population. */
+function maintenanceRow(system, axis, report) {
+  const cfg = getEconomyConfig();
+  const isEnergy = axis === "energy";
+  const percent = isEnergy ? report.request.energyPercent : report.request.mineralsPercent;
+  const required = isEnergy ? report.energyRequired : report.mineralsRequired;
+  const spent = isEnergy ? report.energySpent : report.mineralsSpent;
+  const minusReason = getColonyMaintenanceChangeReason(system, axis, -1);
+  const plusReason = getColonyMaintenanceChangeReason(system, axis, 1);
+  const icon = isEnergy ? "⚡" : "⛏";
+  const label = isEnergy ? "Energy maintenance" : "Housing investment";
+  const sub = isEnergy
+    ? percent + "% · " + formatEconomic(spent) + "/" + formatEconomic(required) + " ⚡ supplied"
+    : percent + "% · " + formatEconomic(spent) + "/" + formatEconomic(required) +
+      " ⛏ · H " + formatEconomic(report.housingCapacity);
   return (
     '<div class="upkeep-row">' +
       '<span class="upkeep-icon" aria-hidden="true">' + icon + "</span>" +
@@ -464,7 +463,7 @@ function populationUpkeepRow(system, axis, policy, bounds) {
         '<button type="button" class="upkeep-step" data-pop-upkeep="' + axis + ':-1"' +
           (minusReason ? ' disabled title="' + minusReason + '" aria-label="Decrease ' + label + '"' : ' aria-label="Decrease ' + label + '"') +
           ">−</button>" +
-        '<b class="upkeep-step-value">' + value + "</b>" +
+        '<b class="upkeep-step-value">' + percent + "%</b>" +
         '<button type="button" class="upkeep-step" data-pop-upkeep="' + axis + ':1"' +
           (plusReason ? ' disabled title="' + plusReason + '" aria-label="Increase ' + label + '"' : ' aria-label="Increase ' + label + '"') +
           ">+</button>" +
@@ -473,92 +472,200 @@ function populationUpkeepRow(system, axis, policy, bounds) {
   );
 }
 
-/* The population menu. Everything the colony needs to describe its growth:
-   the current population, the houses that cap it and the sustenance that
-   sets its growth rate, both driven by standing upkeep steppers. */
+/* The automatic crew strategy selector: two config-driven buttons plus the
+   active rule. The colony sheet owns the click; this helper only renders it. */
+function workerStrategyHTML(workforce, cfg) {
+  const strategies = cfg.workerStrategies || [];
+  const active = workforce.strategy;
+  const current = strategies.find(function (entry) { return entry.id === active; });
+  const buttons = strategies.map(function (entry) {
+    const selected = entry.id === active;
+    return '<button type="button" class="strategy-btn' + (selected ? " active" : "") +
+      '" data-worker-strategy="' + entry.id + '" aria-pressed="' + (selected ? "true" : "false") + '">' +
+      entry.label + "</button>";
+  }).join("");
+  const note = workforce.hasOrders
+    ? "Explicit orders are pinned. RESET CREWS TO AUTO applies this strategy."
+    : (current && current.description ? current.description : "Choose how automatic workers are shared.");
+  return '<div class="worker-strategy">' +
+    '<div class="worker-strategy-head"><span class="worker-strategy-title">AUTO CREW ORDER</span>' +
+      '<span class="worker-strategy-value">' + (current ? current.label : String(active || "")) + "</span></div>" +
+    '<div class="worker-strategy-options">' + buttons + "</div>" +
+    '<p class="strategy-note">' + note + "</p>" +
+  "</div>";
+}
+
+/* The population menu. It explains the whole chain: energy supplied and
+   minerals invested produce happiness, happiness produces growth, and the
+   workforce decides what the colony produces before that bill is paid. */
 function populationSheetHTML(system) {
   const planet = getPlanetBreakdown(system);
+  const report = planet.populationMaintenance;
   const wf = planet.workforce;
-  const sust = wf.sustenance;
-  const sustCfg = getPopulationSustenanceConfig();
-  const policy = getPopulationPolicy(system);
-  const bounds = { housing: getMaxHousingUpkeep(system), sustenance: getMaxSustenanceUpkeep(system) };
   const sector = getSector(system.sectorId);
   const sectorEcon = sector ? getSectorEconomy(sector.id) : null;
-  const tier = sust.tier || { id: "starving", label: "STARVING" };
-  const meterWidth = sustCfg.maxMult > 0 ? clamp((sust.mult / sustCfg.maxMult) * 100, 0, 100) : 0;
-  const growthValue = wf.canGrow ? "+" + formatAmount(wf.growthPerTurn) : "0";
-  const growthClass = wf.canGrow ? "text-good" : wf.overcrowded ? "text-bad" : "text-gold";
+  const cfg = getEconomyConfig();
+  const happiness = Math.round(report.happiness);
+  const energyPercent = Math.round(report.energyFulfillment * 100);
+  const housingPercent = report.population > 0
+    ? clamp((report.housingCapacity / report.population) * 100, 0, 100)
+    : 100;
+  const tier = report.tier || { id: "miserable", label: "MISERABLE" };
+  const growthValue = report.canGrow ? "+" + formatGrowthAmount(report.growthAmount) : "0";
+  const growthClass = report.canGrow ? "text-good" : report.population <= 0 ? "text-bad" : "text-gold";
   const parts = [];
 
   parts.push(
     '<div class="sheet-summary population-summary">' +
       '<span class="big-icon" aria-hidden="true">👥</span>' +
-      '<span class="big-value">' + wf.population + "<small>/ " + wf.cap + "</small></span>" +
+      '<span class="big-value">' + report.population + "</span>" +
       '<span class="big-delta ' + growthClass + '">' + growthValue + " / TURN</span>" +
     "</div>"
   );
   parts.push('<p class="sheet-scope">' + system.name.toUpperCase() +
-    " · HOUSING IS THE HARD CAP · SUSTENANCE IS THE GROWTH RATE</p>");
+    " · E_required = P^" + cfg.energyExponent + " · H = M_spent^" + cfg.housingExponent +
+    " · HAPPINESS DRIVES GROWTH</p>");
 
-  /* HOUSING */
-  const atHousingMax = policy.housing >= bounds.housing;
-  const housingState = wf.overcrowded
-    ? '<span class="text-bad">Housing is below the population: the extra people leave when the turn ends.</span>'
-    : wf.housingRoom > 0
-      ? '<span class="text-good">Room for ' + wf.housingRoom + " more " + (wf.housingRoom === 1 ? "person" : "people") + ".</span>"
-      : atHousingMax
-        ? '<span class="text-gold">Every house this planet can hold is built. The population is at its size limit.</span>'
-        : '<span class="text-gold">Every house is taken. Raise the mineral upkeep to make room.</span>';
-  parts.push('<div class="sheet-section"><h3>HOUSING <span class="population-stat-tag">HARD CAP</span></h3>');
-  parts.push(breakdownRow("Houses available", String(wf.cap), {
-    sub: wf.baseHousing + " founding shelter + " + wf.paidHouses + " paid",
-    amountClass: wf.cap > wf.population ? "text-good" : "text-gold"
-  }));
-  parts.push(breakdownRow("Population", wf.population + " / " + wf.cap, {
-    sub: wf.housingRoom > 0 ? wf.housingRoom + " free" : "No free houses",
-    amountClass: wf.overcrowded ? "text-bad" : ""
-  }));
-  parts.push(populationUpkeepRow(system, "housing", policy, bounds));
-  parts.push('<p class="upkeep-status">' + housingState + '</p>');
+  /* MAINTENANCE */
+  parts.push(
+    '<div class="sheet-section"><h3>MAINTENANCE · PAID FROM ' +
+      (sector ? sector.name.toUpperCase() : "THIS SECTOR") + "</h3>"
+  );
+  parts.push(maintenanceRow(system, "energy", report));
+  parts.push(maintenanceRow(system, "minerals", report));
+  parts.push(
+    '<p class="upkeep-status">Maintenance is a share of the full requirement, charged every turn. ' +
+    "The sector ledger caps the actual spend: a colony that cannot pay keeps its stock at zero and loses fulfillment, never " +
+    "falls into a negative balance. " + cfg.stepPercent + "% per press.</p>"
+  );
   parts.push("</div>");
 
-  /* SUSTENANCE */
-  let sustState;
-  if (sust.percent >= sust.maxPercent) {
-    sustState = '<span class="text-good">Thriving. Surplus food and entertainment push growth to its maximum.</span>';
-  } else if (sust.percent >= 100) {
-    sustState = '<span class="text-good">Content. Everyone is fed and the colony grows at its full rate.</span>';
-  } else if (sust.percent > 0) {
-    sustState = '<span class="text-gold">Rationing. ' + sust.percent + "% of the growth rate is funded; raise the energy upkeep to feed everyone.</span>";
-  } else {
-    sustState = '<span class="text-bad">Starving. No sustenance upkeep is funded, so growth is halted.</span>';
-  }
-  parts.push('<div class="sheet-section"><h3>SUSTENANCE <span class="sustenance-tier tier-' + tier.id + '">' + tier.label + "</span></h3>");
+  /* ENERGY */
+  parts.push('<div class="sheet-section"><h3>ENERGY <span class="colony-tier tier-' + tier.id + '">' +
+    energyPercent + "% SUPPLIED</span></h3>");
   parts.push(
-    '<div class="sustenance-meter" role="img" aria-label="Sustenance ' + sust.percent + " percent\">" +
-      '<span class="sustenance-fill tier-' + tier.id + '" style="width:' + meterWidth.toFixed(1) + '%"></span>' +
+    '<div class="colony-meter" role="img" aria-label="Energy ' + energyPercent + ' percent">' +
+      '<span class="colony-fill energy tier-' + tier.id + '" style="width:' + energyPercent + '%"></span>' +
     "</div>"
   );
-  parts.push(breakdownRow("Supply / demand", formatAmount(sust.supply) + " / " + sust.demand, {
-    sub: policy.sustenance + " ⚡ upkeep · " + sustCfg.populationPerEnergy + " fed per energy",
-    amountClass: sust.percent >= 100 ? "text-good" : sust.percent > 0 ? "text-gold" : "text-bad"
+  parts.push(breakdownRow("E_required = P^" + cfg.energyExponent,
+    formatAmount(report.energyRequired) + " ⚡", {
+      sub: "P = " + report.population,
+      amountClass: "text-faint"
+    }));
+  parts.push(breakdownRow("E_spent", formatEconomic(report.energySpent) + " ⚡", {
+    sub: "of " + formatEconomic(report.energyRequested) + " requested · " +
+      formatEconomic(Math.max(0, report.energyRequired - report.energySpent)) + " short",
+    amountClass: energyPercent >= 100 ? "text-good" : energyPercent > 0 ? "text-gold" : "text-bad"
   }));
-  parts.push(breakdownRow("Growth multiplier", "×" + sust.mult.toFixed(2) + " · " + sust.percent + "%", {
-    sub: "100% feeds everyone · " + sust.maxPercent + "% is the maximum",
-    amountClass: sust.percent >= 100 ? "text-good" : sust.percent > 0 ? "text-gold" : "text-bad"
+  parts.push(breakdownRow("Fulfillment G = E_spent / E_required", energyPercent + "%", {
+    sub: "Excess supply is capped at 100%",
+    amountClass: energyPercent >= 100 ? "text-good" : energyPercent > 0 ? "text-gold" : "text-bad"
   }));
-  parts.push(populationUpkeepRow(system, "sustenance", policy, bounds));
-  parts.push('<p class="upkeep-status">' + sustState + '</p>');
   parts.push("</div>");
 
-  /* UPKEEP — the sector bill these two standing orders create. */
-  parts.push('<div class="sheet-section"><h3>UPKEEP · PAID BY ' +
-    (sector ? sector.name.toUpperCase() : "THIS SECTOR") + "</h3>");
-  parts.push(signedBreakdownRow("⛏ Population housing", -policy.housing,
-    wf.paidHouses + (wf.paidHouses === 1 ? " house" : " houses") + " funded"));
-  parts.push(signedBreakdownRow("⚡ Population sustenance", -policy.sustenance,
-    sust.percent + "% growth funded"));
+  /* HOUSING */
+  parts.push('<div class="sheet-section"><h3>HOUSING <span class="colony-tier tier-' + tier.id + '">' +
+    Math.round(housingPercent) + "% HOUSED</span></h3>");
+  parts.push(
+    '<div class="colony-meter" role="img" aria-label="Housing ' + Math.round(housingPercent) + ' percent">' +
+      '<span class="colony-fill housing tier-' + tier.id + '" style="width:' + housingPercent.toFixed(1) + '%"></span>' +
+    "</div>"
+  );
+  parts.push(breakdownRow("M_required for H = P", formatEconomic(report.mineralsRequired) + " ⛏", {
+    sub: "P^(1/" + cfg.housingExponent + ") · " + cfg.maxPercent + "% buys full housing",
+    amountClass: "text-faint"
+  }));
+  parts.push(breakdownRow("H = M_spent^" + cfg.housingExponent, formatEconomic(report.housingCapacity), {
+    sub: formatEconomic(report.mineralsSpent) + " ⛏ invested",
+    amountClass: report.housingDeficit > 0 ? "text-bad" : "text-good"
+  }));
+  parts.push(breakdownRow("Housing deficit", formatEconomic(report.housingDeficit), {
+    sub: "h = deficit / P = " + (report.normalizedHousingDeficit * 100).toFixed(1) + "%",
+    amountClass: report.housingDeficit > 0 ? "text-bad" : "text-good"
+  }));
+  parts.push("</div>");
+
+  /* HAPPINESS */
+  parts.push('<div class="sheet-section"><h3>HAPPINESS <span class="colony-tier tier-' + tier.id + '">' +
+    tier.label + "</span></h3>");
+  parts.push(breakdownRow("F = 100 × min(1, G) × max(0, 1 − h)", happiness + "%", {
+    className: "total",
+    amountClass: happiness >= 70 ? "text-good" : happiness >= 40 ? "text-gold" : "text-bad"
+  }));
+  parts.push(breakdownRow("Energy factor", Math.round(report.energyFulfillment * 100) + "%", {
+    sub: "min(1, G) stops at 100%"
+  }));
+  parts.push(breakdownRow("Housing factor", Math.round((1 - report.normalizedHousingDeficit) * 100) + "%", {
+    sub: "max(0, 1 − h)"
+  }));
+  parts.push("</div>");
+
+  /* GROWTH */
+  const nextPopText = report.canGrow
+    ? report.turnsToNextPop + (report.turnsToNextPop === 1 ? " turn" : " turns")
+    : report.growthBlockedBy === "unfunded"
+      ? "Unfunded"
+      : report.growthBlockedBy === "energy"
+        ? "No energy"
+        : report.growthBlockedBy === "housing"
+          ? "No housing"
+          : report.population <= 0
+            ? "No population"
+            : "No happiness";
+  parts.push('<div class="sheet-section"><h3>GROWTH</h3>');
+  parts.push(breakdownRow("Base growth at 100% happiness",
+    "+" + formatAmount(report.population * cfg.growthRate) + " / turn", {
+      sub: "P × " + (cfg.growthRate * 100).toFixed(0) + "%"
+    }));
+  parts.push(breakdownRow("Growth at current happiness", growthValue + " / turn", {
+    sub: "P × " + (cfg.growthRate * 100).toFixed(0) + "% × " + (report.happiness / cfg.happinessMax).toFixed(2),
+    amountClass: growthClass
+  }));
+  parts.push(breakdownRow("Next population", nextPopText, {
+    sub: report.growthProgress > 0 ? Math.round(report.growthProgress * 100) + "% banked" : "No growth banked"
+  }));
+  parts.push("</div>");
+
+  /* WORKFORCE */
+  const idleNames = wf.entries.filter(function (entry) {
+    return !entry.underConstruction && entry.eligible && entry.workersRequired > 0 && entry.workersAssigned === 0;
+  }).map(function (entry) { return BUILDINGS[entry.type] ? BUILDINGS[entry.type].name : entry.type; });
+  const blockedNames = wf.entries.filter(function (entry) {
+    return !entry.underConstruction && !entry.eligible;
+  }).map(function (entry) { return BUILDINGS[entry.type] ? BUILDINGS[entry.type].name : entry.type; });
+  parts.push('<div class="sheet-section"><h3>WORKFORCE</h3>');
+  parts.push(workerStrategyHTML(wf, cfg));
+  parts.push(breakdownRow("Posts staffed", wf.jobsStaffed + " / " + wf.jobsTotal, {
+    sub: wf.availableWorkers + " free " + (wf.availableWorkers === 1 ? "worker" : "workers") +
+      (wf.hasOrders ? " · explicit orders" : " · auto " + getWorkerStrategyLabel(wf.strategy)),
+    amountClass: wf.idleJobs ? "text-gold" : "text-good"
+  }));
+  parts.push(breakdownRow("Idle facilities", String(wf.idleBuildings), {
+    sub: idleNames.length ? idleNames.join(", ") + " — no workers, no output" : "Every eligible facility has a crew",
+    amountClass: wf.idleBuildings ? "text-bad" : "text-good"
+  }));
+  parts.push(breakdownRow("Blocked by population", String(wf.blockedBuildings), {
+    sub: blockedNames.length ? blockedNames.join(", ") + " — below the minimum colony population" : "Every facility meets its population gate",
+    amountClass: wf.blockedBuildings ? "text-bad" : "text-good"
+  }));
+  parts.push(breakdownRow("Understaffed", String(wf.partialBuildings), {
+    sub: wf.partialBuildings ? "Partial output until the crew is filled" : "Every crew is full",
+    amountClass: wf.partialBuildings ? "text-gold" : "text-good"
+  }));
+  if (wf.hasOrders) {
+    parts.push(
+      '<button class="secondary-btn" type="button" data-worker-auto="' + system.id + '">RESET CREWS TO AUTO</button>'
+    );
+  }
+  parts.push("</div>");
+
+  /* SECTOR BILL */
+  parts.push('<div class="sheet-section"><h3>SECTOR BILL</h3>');
+  parts.push(signedBreakdownRow("⚡ Energy maintenance (actual)", -report.energySpent,
+    formatEconomic(report.energySpent) + " of " + formatEconomic(report.energyRequested) + " requested"));
+  parts.push(signedBreakdownRow("⛏ Housing investment (actual)", -report.mineralsSpent,
+    formatEconomic(report.mineralsSpent) + " of " + formatEconomic(report.mineralsRequested) + " requested"));
   if (sectorEcon) {
     parts.push(breakdownRow("Sector energy after upkeep", "⚡ " + formatSigned(sectorEcon.net.energy), {
       sub: "Net per turn in " + sector.name,
@@ -571,64 +678,16 @@ function populationSheetHTML(system) {
   }
   parts.push("</div>");
 
-  /* GROWTH */
-  const fillPercent = wf.cap > 0 ? Math.round((1 - wf.housingRoom / wf.cap) * 100) : 0;
-  const nextPopText = wf.overcrowded
-    ? "Emigration"
-    : wf.growthBlockedBy === "housing"
-      ? (policy.housing >= bounds.housing ? "Size limit" : "Housing full")
-      : wf.growthBlockedBy === "sustenance"
-        ? "No sustenance"
-        : wf.turnsToNextPop == null
-          ? "Paused"
-          : wf.turnsToNextPop + (wf.turnsToNextPop === 1 ? " turn" : " turns");
-  parts.push('<div class="sheet-section"><h3>GROWTH</h3>');
-  parts.push(breakdownRow("Base growth at full sustenance", formatAmount(wf.growthRate) + " / turn", {
-    sub: "Slows as the houses fill"
-  }));
-  parts.push(breakdownRow("Housing fill", fillPercent + "%", {
-    sub: wf.population + " of " + wf.cap + " houses used"
-  }));
-  parts.push(breakdownRow("Sustenance multiplier", "×" + sust.mult.toFixed(2), {
-    sub: tier.label,
-    amountClass: sust.percent >= 100 ? "text-good" : sust.percent > 0 ? "text-gold" : "text-bad"
-  }));
-  parts.push(breakdownRow("Projected growth", growthValue + " / turn", {
-    className: "total",
-    amountClass: growthClass
-  }));
-  parts.push(breakdownRow("Next population", nextPopText, {
-    sub: wf.growthProgress > 0 ? Math.round(wf.growthProgress * 100) + "% banked" : "No growth banked"
-  }));
-  parts.push("</div>");
-
-  /* WORKFORCE */
-  const idleNames = wf.entries.filter(function (entry) {
-    return !entry.underConstruction && entry.workersRequired > 0 && entry.workersAssigned === 0;
-  }).map(function (entry) { return BUILDINGS[entry.type] ? BUILDINGS[entry.type].name : entry.type; });
-  parts.push('<div class="sheet-section"><h3>WORKFORCE</h3>');
-  parts.push(breakdownRow("Posts staffed", wf.jobsStaffed + " / " + wf.jobsTotal, {
-    sub: wf.availableWorkers + " free " + (wf.availableWorkers === 1 ? "worker" : "workers"),
-    amountClass: wf.idleJobs ? "text-gold" : "text-good"
-  }));
-  parts.push(breakdownRow("Idle buildings", String(wf.idleBuildings), {
-    sub: idleNames.length ? idleNames.join(", ") + " — no workers, upkeep still paid" : "Every building has a crew",
-    amountClass: wf.idleBuildings ? "text-bad" : "text-good"
-  }));
-  parts.push(breakdownRow("Understaffed", String(wf.partialBuildings), {
-    sub: wf.partialBuildings ? "Partial output until the population grows" : "Every crew is full",
-    amountClass: wf.partialBuildings ? "text-gold" : "text-good"
-  }));
-  parts.push("</div>");
-
   parts.push(
-    '<p class="sheet-note">Housing and sustenance are standing orders: both are charged to this sector every turn when you end the turn. ' +
-    "Housing is a hard cap, so it cannot be lowered below the current population. Sustenance is the growth rate: 1 ⚡ feeds " +
-    sustCfg.populationPerEnergy + " population, everyone fed is 100% growth, and a surplus can push it to " + sust.maxPercent +
-    "%. A sector that cannot pay falls into a deficit and loses 2 stability that turn.</p>"
+    '<p class="sheet-note">Energy maintenance and housing investment are standing orders: both are charged to this sector every turn when you end the turn. ' +
+    "Happiness is the product of energy fulfillment and housing fulfillment, and growth is population × " +
+    (cfg.growthRate * 100).toFixed(0) + "% × happiness. Population growth is applied after the maintenance bill, so a colony that cannot pay this turn grows more slowly. " +
+    "Facilities need a minimum colony population; automatic crews follow the selected strategy until you pin them with the − / + buttons on the colony screen.</p>"
   );
   return parts.join("");
 }
+
+/* ---------- population menu ---------- */
 
 function planetDetailsHTML(system) {
   const planet = getPlanetBreakdown(system);
@@ -640,56 +699,78 @@ function planetDetailsHTML(system) {
   const used = getUsedSlots(system);
   const age = system.home ? null : Math.max(0, state.turn - system.foundedTurn);
   const workforce = planet.workforce;
+  const report = planet.populationMaintenance;
   const idleNames = workforce.entries.filter(function (entry) {
-    return !entry.underConstruction && entry.workersRequired > 0 && entry.workersAssigned === 0;
+    return !entry.underConstruction && entry.eligible && entry.workersRequired > 0 && entry.workersAssigned === 0;
   }).map(function (entry) { return BUILDINGS[entry.type].name; });
   const partialNames = workforce.entries.filter(function (entry) {
-    return !entry.underConstruction && entry.workersRequired > 0 &&
+    return !entry.underConstruction && entry.eligible && entry.workersRequired > 0 &&
       entry.workersAssigned > 0 && entry.workersAssigned < entry.workersRequired;
   }).map(function (entry) { return BUILDINGS[entry.type].name; });
-  const sust = workforce.sustenance;
-  const growthLabel = workforce.canGrow
-    ? "+" + formatAmount(workforce.growthPerTurn) + " / turn"
-    : workforce.overcrowded
-      ? "Overcrowded"
-      : workforce.growthBlockedBy === "sustenance"
-        ? "No sustenance"
-        : "Housing full";
-  const growthSub = workforce.canGrow
-    ? (workforce.turnsToNextPop === 1
+  const blockedNames = workforce.entries.filter(function (entry) {
+    return !entry.underConstruction && !entry.eligible;
+  }).map(function (entry) { return BUILDINGS[entry.type].name + " (" + entry.minPopulation + "+)"; });
+  const happiness = Math.round(report.happiness);
+  const growthLabel = report.canGrow
+    ? "+" + formatGrowthAmount(report.growthAmount) + " / turn"
+    : report.growthBlockedBy === "unfunded"
+      ? "Unfunded"
+      : report.growthBlockedBy === "energy"
+        ? "No energy"
+        : report.growthBlockedBy === "housing"
+          ? "No housing"
+          : report.population <= 0
+            ? "No population"
+            : "No happiness";
+  const growthSub = report.canGrow
+    ? (report.turnsToNextPop === 1
         ? "Next population next turn"
-        : "Next population in " + workforce.turnsToNextPop + " turns")
-    : workforce.overcrowded
-      ? "Housing is below the population"
-      : workforce.growthBlockedBy === "sustenance"
-        ? "Fund energy sustenance in the population menu"
-        : "Raise the mineral housing upkeep in the population menu";
+        : "Next population in " + report.turnsToNextPop + " turns")
+    : report.growthBlockedBy === "unfunded"
+      ? "Fund energy and housing in the population menu"
+      : report.growthBlockedBy === "energy"
+        ? "Fund energy maintenance in the population menu"
+        : report.growthBlockedBy === "housing"
+          ? "Invest more minerals in housing"
+          : "Happiness is zero";
   const parts = [];
 
   parts.push(
     '<div class="sheet-summary">' +
       '<span class="big-icon" aria-hidden="true">👥</span>' +
-      '<span class="big-value">' + workforce.population + "/" + workforce.cap + "</span>" +
-      '<span class="big-delta">POPULATION</span>' +
+      '<span class="big-value">' + report.population + "</span>" +
+      '<span class="big-delta ' + (happiness >= 70 ? "text-good" : happiness >= 40 ? "text-gold" : "text-bad") + '">' +
+        happiness + "% HAPPY</span>" +
     "</div>"
   );
 
   parts.push('<div class="sheet-section"><h3>POPULATION &amp; WORKFORCE</h3>');
-  parts.push(breakdownRow("Population", workforce.population + " / " + workforce.cap, {}));
-  parts.push(breakdownRow("Housing", String(workforce.cap), {
-    sub: workforce.baseHousing + " founding shelter + " + workforce.paidHouses + " paid · " +
-      workforce.housingUpkeep + " ⛏ upkeep"
+  parts.push(breakdownRow("Population", String(report.population), {}));
+  parts.push(breakdownRow("Happiness", happiness + "% · " + report.tier.label, {
+    amountClass: happiness >= 70 ? "text-good" : happiness >= 40 ? "text-gold" : "text-bad"
   }));
-  parts.push(breakdownRow("Sustenance", sust.percent + "% · " + sust.tier.label, {
-    sub: sust.supply + " fed / " + sust.demand + " needed · " + workforce.sustenanceUpkeep + " ⚡ upkeep",
-    amountClass: sust.percent >= 100 ? "text-good" : sust.percent > 0 ? "text-gold" : "text-bad"
+  parts.push(breakdownRow("Energy supplied", Math.round(report.energyFulfillment * 100) + "%", {
+    sub: formatEconomic(report.energySpent) + " of " + formatEconomic(report.energyRequired) + " ⚡",
+    amountClass: report.energyFulfillment >= 1 ? "text-good" : report.energyFulfillment > 0 ? "text-gold" : "text-bad"
+  }));
+  parts.push(breakdownRow("Housing", formatEconomic(report.housingCapacity) + " / " + report.population, {
+    sub: report.housingDeficit > 0
+      ? formatEconomic(report.housingDeficit) + " people without a roof"
+      : "Everyone is housed",
+    amountClass: report.housingDeficit > 0 ? "text-bad" : "text-good"
   }));
   parts.push(breakdownRow("Jobs staffed", workforce.jobsStaffed + " / " + workforce.jobsTotal, {
-    sub: workforce.jobsTotal ? workforce.availableWorkers + " free workers" : "No worker posts yet",
+    sub: workforce.jobsTotal
+      ? workforce.availableWorkers + " free workers · " + (workforce.hasOrders ? "explicit orders" : "auto " + getWorkerStrategyLabel(workforce.strategy))
+      : "No worker posts yet",
     amountClass: workforce.idleJobs ? "text-bad" : "text-good"
   }));
+  parts.push(breakdownRow("Blocked by population", String(workforce.blockedBuildings), {
+    sub: blockedNames.length ? blockedNames.join(", ") : "Every facility meets its population gate",
+    amountClass: workforce.blockedBuildings ? "text-bad" : "text-good"
+  }));
   parts.push(breakdownRow("Idle buildings", String(workforce.idleBuildings), {
-    sub: idleNames.length ? idleNames.join(", ") + " — no workers, upkeep still paid" : "Every building has a crew",
+    sub: idleNames.length ? idleNames.join(", ") + " — no workers, no output" : "Every eligible building has a crew",
     amountClass: workforce.idleBuildings ? "text-bad" : "text-good"
   }));
   parts.push(breakdownRow("Understaffed", String(workforce.partialBuildings), {
@@ -698,7 +779,7 @@ function planetDetailsHTML(system) {
   }));
   parts.push(breakdownRow("Growth", growthLabel, {
     sub: growthSub,
-    amountClass: workforce.canGrow ? "text-good" : "text-bad"
+    amountClass: report.canGrow ? "text-good" : "text-bad"
   }));
   parts.push("</div>");
 
@@ -733,9 +814,15 @@ function planetDetailsHTML(system) {
     parts.push(signedBreakdownRow("⛏ " + item.label, -item.amount, item.sub));
   });
   parts.push(
-    breakdownRow("Net local energy", formatSigned(planet.output.energy - planet.upkeep), {
+    breakdownRow("Net local energy", formatSigned(planet.localNetEnergy), {
       className: "total",
-      amountClass: signedClass(planet.output.energy - planet.upkeep)
+      amountClass: signedClass(planet.localNetEnergy)
+    })
+  );
+  parts.push(
+    breakdownRow("Net local minerals", formatSigned(planet.localNetMinerals), {
+      className: "total",
+      amountClass: signedClass(planet.localNetMinerals)
     })
   );
   parts.push("</div>");
@@ -773,6 +860,6 @@ function planetDetailsHTML(system) {
   }
   parts.push("</div>");
 
-  parts.push('<p class="sheet-note">Local production above is before empire modifiers and only includes staffed work. Completed buildings pay energy upkeep even without workers, and that upkeep is charged to this sector. Population housing draws minerals and population sustenance draws energy from the same sector ledger. Energy and minerals stay local; research and influence go to the empire stockpile. Open the population card on the colony screen to fund houses and sustenance.</p>');
+  parts.push('<p class="sheet-note">Local production above is before empire modifiers and only includes staffed work. Completed buildings pay their energy upkeep even without workers, and that upkeep is charged to this sector. Population maintenance is resolved first: the colony gets the energy and housing its percentage share can buy from this ledger, then infrastructure upkeep is paid from what is left. Energy and minerals stay local; research and influence go to the empire stockpile. Open the population card on the colony screen to change maintenance and to pin facility crews.</p>');
   return parts.join("");
 }

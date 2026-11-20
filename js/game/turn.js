@@ -30,47 +30,46 @@ function completeConstruction() {
   });
 }
 
-/* Growth saturates as the houses fill, and the sustenance multiplier scales
-   it. Fractional progress carries between turns, so a +0.5 / turn colony
-   gains one population every two turns rather than being rounded down
-   forever. Housing is a hard cap: a colony that somehow holds more people
-   than houses settles the overflow first. */
+/* Population growth is resolved after maintenance. applyColonyGrowth() reads
+   the report banked by resolvePopulationMaintenance(); if no report exists
+   (a hand-built fixture or a direct harness call) it projects one. Fractions
+   carry between turns, so +0.5/turn gains a person every two turns. Growth is
+   never negative and there is no hard housing cap any more: a crowded colony
+   simply grows more slowly. */
 function growPopulations() {
   state.systems.forEach(function (system) {
     if (!system.colonized) return;
-    const plan = getWorkforcePlan(system);
-    let population = plan.population;
-    let progress = clamp(system.growthProgress || 0, 0, 1);
-    if (population > plan.cap) {
-      population = plan.cap;
-      progress = 0;
-    }
-    if (plan.canGrow && plan.growthPerTurn > 0) {
-      progress += plan.growthPerTurn;
-      while (population < plan.cap && progress >= 1) {
-        population += 1;
-        progress -= 1;
-      }
-      if (population >= plan.cap) progress = 0;
-    }
-    system.population = population;
-    system.growthProgress = progress;
+    applyColonyGrowth(system);
   });
 }
 
-/* Per-turn upkeep is paid by the sector that owns the colony, building,
-   orbital structure or research project. Each sector keeps its own energy and
-   mineral stockpiles, so one sector cannot bail another out. Population
-   housing draws minerals and population sustenance draws energy. */
+/* Infrastructure upkeep is paid by the sector that owns the colony, building,
+   orbital structure or research project. Population maintenance is paid
+   first, by resolvePopulationMaintenance(), so the sector's remaining stock is
+   what this bill can draw from. Nothing is allowed to push a ledger below
+   zero; a shortfall is reported and costs stability once that turn. */
 function paySectorUpkeep() {
   const paid = {};
   let deficit = false;
   state.galaxy.sectors.forEach(function (sector) {
     const sectorEcon = getSectorEconomy(sector.id);
-    paid[sector.id] = { energy: sectorEcon.upkeep, minerals: sectorEcon.mineralUpkeep };
-    if (sectorEcon.upkeep) addSectorStock(sector.id, "energy", -sectorEcon.upkeep);
-    if (sectorEcon.mineralUpkeep) addSectorStock(sector.id, "minerals", -sectorEcon.mineralUpkeep);
-    if (getSectorStock(sector.id, "energy") < 0 || getSectorStock(sector.id, "minerals") < 0) {
+    const dueEnergy = Math.max(0, sectorEcon.infrastructureUpkeep || 0);
+    const dueMinerals = 0;
+    const stockEnergy = Math.max(0, getSectorStock(sector.id, "energy"));
+    const stockMinerals = Math.max(0, getSectorStock(sector.id, "minerals"));
+    const energyPaid = Math.min(dueEnergy, stockEnergy);
+    const mineralsPaid = Math.min(dueMinerals, stockMinerals);
+    if (energyPaid > 0) addSectorStock(sector.id, "energy", -energyPaid);
+    if (mineralsPaid > 0) addSectorStock(sector.id, "minerals", -mineralsPaid);
+    paid[sector.id] = {
+      energy: dueEnergy,
+      minerals: dueMinerals,
+      energyPaid: energyPaid,
+      mineralsPaid: mineralsPaid,
+      shortfallEnergy: Math.max(0, dueEnergy - energyPaid),
+      shortfallMinerals: Math.max(0, dueMinerals - mineralsPaid)
+    };
+    if (energyPaid + 1e-9 < dueEnergy || mineralsPaid + 1e-9 < dueMinerals) {
       deficit = true;
     }
   });
@@ -191,12 +190,20 @@ function endTurn() {
   renderNav();
   renderMap();
 
-  // 1. Every sector pays the energy and mineral upkeep of what it hosts.
+  // 1. Population maintenance is paid first, from the sector ledgers that
+  //    exist at the moment the turn closes. Each colony's energy supply and
+  //    housing investment are resolved against the same stock allocation, so
+  //    the preview the player saw is the bill that is paid.
+  const maintenanceReport = resolvePopulationMaintenance();
+  state.lastMaintenance = maintenanceReport;
+
+  // 2. Infrastructure upkeep (colony overhead, buildings, orbitals and the
+  //    research directorate) draws on what population maintenance left. A
+  //    sector that cannot cover it is in deficit; the penalty is charged once
+  //    per turn however many sectors are short.
   const upkeepReport = paySectorUpkeep();
 
-  // 2. Overexpansion pressure + stability check. One sector in the red in
-  //    either resource is enough to shake the empire; the penalty is charged
-  //    once per turn.
+  // 3. Overexpansion pressure + stability check.
   if (upkeepReport.deficit) {
     state.stability = clamp(state.stability - CONFIG.stability.energyDeficitPenalty, 0, 100);
   }
@@ -205,10 +212,10 @@ function endTurn() {
     return;
   }
 
-  // 3. Construction completes, ready for next turn.
+  // 4. Construction completes, ready for next turn.
   completeConstruction();
 
-  // 4. New turn begins. Shipyards launch queued ships and every fleet
+  // 5. New turn begins. Shipyards launch queued ships and every fleet
   //    advances along its route. Rival powers then take their turn and both
   //    sides resolve patrols, battles, raids and repairs before survey work.
   state.turn += 1;
@@ -226,12 +233,12 @@ function endTurn() {
   advanceAnomalyStudies();
   if (state.phase === "ended") return;
 
-  // 5. Population grows into the houses and sustenance funded in the
-  //    population menu. New workers staff buildings before production is
-  //    calculated for the new turn.
+  // 6. Population grows at the rate the maintenance report resolved. New
+  //    workers staff facilities before production is calculated for the new
+  //    turn.
   growPopulations();
 
-  // 6. Produce resources. Energy and minerals are paid into each sector's
+  // 7. Produce resources. Energy and minerals are paid into each sector's
   //    own ledger; research and influence flow into the empire stockpile.
   state.galaxy.sectors.forEach(function (sector) {
     const sectorEcon = getSectorEconomy(sector.id);
@@ -242,15 +249,15 @@ function endTurn() {
   applyResourceIncome("research", economy.income.research);
   applyResourceIncome("influence", economy.income.influence);
 
-  // 7. Trading centers ship after production, so a sector can fund its own
-  //    upkeep first. Transfers never take more than the source holds.
+  // 8. Trading centers ship after production. Transfers never take more than
+  //    the source holds; the recipient sees them on the next turn's bill.
   resolveTradeTransfers();
 
   // Research is auto-invested in whichever project is active.
   investResearchStock();
   if (state.phase === "ended") return;
 
-  // 8. Encounter cards are paced. Only a turn the deck is due draws a card;
+  // 9. Encounter cards are paced. Only a turn the deck is due draws a card;
   //    every other turn returns straight to free actions.
   const after = getDisplayResources();
   state.currentEvent = isEventDue(state.turn) ? drawEvent() : null;

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /* ============================================================
-   POPULATION HARNESS — the population card, menu and standing upkeep
+   POPULATION HARNESS — the colony maintenance card, menu and crew controls
    The app intentionally has no build step, so this harness loads the classic
    browser scripts in a Node VM with element stubs. Run it with:
 
        node tests/population-harness.js
 
-   It covers the clickable population card, the houses/sustenance readout, the
-   two upkeep steppers in the population menu, the hard house cap, sustenance
-   tiers, the mineral and energy upkeep lines in the economy sheets, and the
-   removed Residential Block.
+   It covers the clickable population card, the energy/housing readout, the
+   two maintenance steppers, happiness/growth copy, the workforce section and
+   reset button, the facility crew buttons, the build sheet's level/minimum
+   population copy, and the resource/detail sheet rows.
    ============================================================ */
 
 const fs = require("fs");
@@ -35,6 +35,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",
@@ -213,15 +214,37 @@ function createContext() {
       state.ui.sheet = null;
       state.ui.spaceportOpen = false;
       toastMessages.length = 0;
-      return state.systems.find(function (system) { return system.home; });
+      /* These UI fixtures use a mature 12-person capital so the card, crew
+         and build-sheet tests can exercise full crews. The actual 3-person
+         opening layout is covered by the colony and economy harnesses. */
+      const capital = state.systems.find(function (system) { return system.home; });
+      capital.population = 12;
+      /* The UI fixtures are fully funded; the 15/15 opening stock is covered
+         by the colony and economy harnesses. */
+      setSectorStock(home.id, "energy", 100);
+      setSectorStock(home.id, "minerals", 100);
+      return capital;
     }
 
     function homeSectorId() {
       return state.galaxy.sectors.find(function (sector) { return sector.home; }).id;
     }
 
-    function setPolicy(system, housing, sustenance) {
-      system.populationUpkeep = { housing: housing, sustenance: sustenance };
+    function setMaintenance(system, energy, minerals) {
+      system.maintenance = { energy: energy, minerals: minerals };
+      return system;
+    }
+
+    function setStock(energy, minerals) {
+      const sectorId = homeSectorId();
+      setSectorStock(sectorId, "energy", energy);
+      setSectorStock(sectorId, "minerals", minerals);
+    }
+
+    function finishBuildings(system) {
+      (system.slots || []).forEach(function (slot) {
+        if (slot) slot.underConstruction = false;
+      });
       return system;
     }
   `, context, { filename: "population-harness-helpers" });
@@ -234,183 +257,298 @@ const els = harness.els;
 function run(code) {
   return vm.runInContext(code, context);
 }
+function reset() {
+  return run("freshPopulation()");
+}
 
-function testCard() {
-  let system = run("freshPopulation()");
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 2)");
-  const planet = context.getPlanetBreakdown(system);
-  const html = context.populationCardHTML(system, planet);
+/* ---------- population card ---------- */
 
+function testPopulationCard() {
+  let system = reset();
+  let planet = context.getPlanetBreakdown(system);
+  let html = context.populationCardHTML(system, planet);
   includes(html, 'data-population-menu="' + system.id + '"', "the population card opens the menu");
-  includes(html, 'aria-haspopup="dialog"', "the card announces a dialog");
   includes(html, "👥", "the card carries the population glyph");
-  includes(html, "3 <small>/ 5</small>", "the card shows three people in five houses");
-  includes(html, "🏠 5 HOUSING", "the card shows the housing stat");
-  includes(html, "🍲 125% SUSTENANCE", "the card shows the sustenance stat");
-  includes(html, "+0.8 / TURN", "the card shows the projected growth");
-  includes(html, "MANAGE HOUSING &amp; SUSTENANCE", "the card invites the player in");
-  excludes(html, "Residential", "the card no longer mentions residential blocks");
+  includes(html, "PEOPLE", "the card labels the population");
+  includes(html, "100% ENERGY", "the card shows energy fulfillment");
+  includes(html, "12 / 12 HOUSED", "the card shows the housed population");
+  includes(html, "100% FLOURISHING", "the card shows happiness and its tier");
+  includes(html, "+0.6 / TURN", "the card forecasts the 5% growth");
+  includes(html, "MANAGE MAINTENANCE &amp; WORKFORCE", "the card names the management menu");
   ok(html.indexOf('<button class="population-card"') === 0, "the card is a real button");
-  ok(html.indexOf("</button>") === html.length - 9, "the card closes cleanly");
-  balanced(html, "span", "the card closes every span");
-  balanced(html, "button", "the card closes every button");
+  balanced(html, "span", "the card markup is balanced");
+  balanced(html, "button", "the card buttons are balanced");
 
-  /* No sustenance: the card calls out the stalled growth. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 0)");
-  const starved = context.populationCardHTML(system, context.getPlanetBreakdown(system));
-  includes(starved, "0% SUSTENANCE", "the card reports zero sustenance");
-  includes(starved, "NO SUSTENANCE", "the card explains why growth is paused");
-  includes(starved, "No sustenance is funded", "the card tells the player what to do");
+  /* No stock: the colony reports the shortfall and stops growing. */
+  run("setStock(0, 0)");
+  planet = context.getPlanetBreakdown(system);
+  html = context.populationCardHTML(system, planet);
+  includes(html, "0% ENERGY", "the card reports zero energy supply");
+  includes(html, "0 / 12 HOUSED", "the card reports the housing deficit");
+  includes(html, "0% MISERABLE", "zero maintenance is miserable");
+  includes(html, "UNFUNDED", "the card explains why growth stopped");
 
-  /* Full houses. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 0, 2)");
-  const full = context.populationCardHTML(system, context.getPlanetBreakdown(system));
-  includes(full, "🏠 3 HOUSING", "the founding shelter holds three at the capital");
-  includes(full, "HOUSING FULL", "the card reports the hard cap");
-  includes(full, "raise the mineral upkeep", "the card points at the housing stepper");
-
-  /* Both stats are unfunded on a fresh capital. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 0, 0)");
-  const unfunded = context.populationCardHTML(system, context.getPlanetBreakdown(system));
-  includes(unfunded, "set both upkeeps to grow", "the card asks for both upkeeps on a new colony");
-
-  /* A planet at its size limit says so instead of promising more houses. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 8, 2); state.systems.find(function (s) { return s.home; }).population = 7");
-  const sizeLimited = context.populationCardHTML(system, context.getPlanetBreakdown(system));
-  includes(sizeLimited, "SIZE LIMIT", "the card names the size limit");
-  includes(sizeLimited, "cannot grow further", "the card explains the size limit");
-
-  /* World tab: the card is embedded inside the colony screen. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 2); state.systems.find(function (s) { return s.home; }).population = 3");
-  const world = context.worldTabHTML(system, true, system.row, system.col);
-  includes(world, 'data-population-menu="' + system.id + '"', "the colony screen renders the population card");
-  includes(world, "<h3>POPULATION</h3>", "the colony section is named Population");
+  /* A facility under its minimum population is called out. */
+  run("setStock(100, 100)");
+  system.slots[0] = { type: "mine", level: 3, underConstruction: false };
+  planet = context.getPlanetBreakdown(system);
+  html = context.populationCardHTML(system, planet);
+  includes(html, "1 BLOCKED", "the card counts facilities below their population gate");
+  includes(html, "below its minimum population", "the card explains the blocked facility");
 }
 
-function testMenu() {
-  let system = run("freshPopulation()");
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 2)");
+function testLowPopulationGrowthCopy() {
+  const system = reset();
+  system.population = 3;
+  eq(context.formatGrowthAmount(0.15), "0.15", "growth keeps two decimals at three population");
+  eq(context.formatGrowthAmount(0.6), "0.6", "larger growth still trims trailing zeros");
+  const planet = context.getPlanetBreakdown(system);
+  eq(context.formatGrowthAmount(planet.populationMaintenance.growthAmount), "0.15",
+    "the three-person colony grows by 0.15");
+  eq(planet.populationMaintenance.turnsToNextPop, 7, "0.15 per turn reaches a whole person in 7 turns");
+  const card = context.populationCardHTML(system, planet);
+  includes(card, "+0.15 / TURN", "the card shows the real growth rate");
+  includes(card, "Next population in 7 turns", "the card's turn count matches that rate");
+  const sheet = context.populationSheetHTML(system);
+  includes(sheet, "+0.15 / turn", "the population sheet shows the real growth rate");
+  includes(sheet, "7 turns", "the population sheet agrees with the card");
+}
+
+/* ---------- population / maintenance menu ---------- */
+
+function testPopulationSheet() {
+  const system = reset();
   let html = context.populationSheetHTML(system);
-
+  includes(html, "MAINTENANCE", "the menu has a maintenance section");
+  includes(html, "Energy maintenance", "the energy row is labelled");
+  includes(html, "Housing investment", "the housing row is labelled");
+  includes(html, "data-pop-upkeep=\"energy:-1\"", "the energy stepper can go down");
+  includes(html, "data-pop-upkeep=\"energy:1\"", "the energy stepper can go up");
+  includes(html, "data-pop-upkeep=\"minerals:-1\"", "the housing stepper can go down");
+  includes(html, "data-pop-upkeep=\"minerals:1\"", "the housing stepper can go up");
+  includes(html, "E_required = P^1.1", "the menu states the energy formula");
+  includes(html, "H = M_spent^0.9", "the menu states the housing formula");
+  includes(html, "F = 100 × min(1, G) × max(0, 1 − h)", "the menu states the happiness formula");
+  includes(html, "ENERGY", "the menu has an energy section");
   includes(html, "HOUSING", "the menu has a housing section");
-  includes(html, "HARD CAP", "the menu marks housing as the hard cap");
-  includes(html, "SUSTENANCE", "the menu has a sustenance section");
-  includes(html, "THRIVING", "the menu names the top sustenance tier");
-  includes(html, "125%", "the menu caps sustenance at 125%");
-  includes(html, "data-pop-upkeep=\"housing:-1\"", "the housing stepper can go down");
-  includes(html, "data-pop-upkeep=\"housing:1\"", "the housing stepper can go up");
-  includes(html, "data-pop-upkeep=\"sustenance:-1\"", "the sustenance stepper can go down");
-  includes(html, "data-pop-upkeep=\"sustenance:1\"", "the sustenance stepper can go up");
-  includes(html, "Housing upkeep", "the housing row is labelled");
-  includes(html, "Sustenance upkeep", "the sustenance row is labelled");
-  includes(html, "2 ⛏ / turn buys 1 house", "the housing conversion is explained");
-  includes(html, "1 ⚡ / turn feeds 2 pop", "the sustenance conversion is explained");
-  includes(html, "Projected growth", "the menu forecasts growth");
+  includes(html, "HAPPINESS", "the menu has a happiness section");
+  includes(html, "GROWTH", "the menu has a growth section");
+  includes(html, "WORKFORCE", "the menu has a workforce section");
+  includes(html, "AUTO CREW ORDER", "the menu has an automatic crew strategy control");
+  includes(html, 'data-worker-strategy="roundRobin"', "round robin is offered");
+  includes(html, 'data-worker-strategy="greedy"', "greedy is offered");
+  includes(html, 'class="strategy-btn active" data-worker-strategy="roundRobin"', "round robin is selected by default");
+  includes(html, "ROUND ROBIN", "the default strategy is labelled");
+  includes(html, "GREEDY", "the greedy strategy is labelled");
+  includes(html, "Growth at current happiness", "the menu forecasts growth");
   includes(html, "Next population", "the menu forecasts the next arrival");
-  includes(html, "UPKEEP · PAID BY", "the menu names who pays the upkeep");
-  includes(html, "Population housing", "the menu itemises the mineral draw");
-  includes(html, "Population sustenance", "the menu itemises the energy draw");
-  excludes(html, "Residential", "the menu has no residential block");
-  balanced(html, "div", "the menu closes every div");
-  balanced(html, "span", "the menu closes every span");
-  balanced(html, "button", "the menu closes every button");
-  balanced(html, "p", "the menu closes every paragraph");
+  includes(html, "Energy maintenance (actual)", "the sector bill itemises energy");
+  includes(html, "Housing investment (actual)", "the sector bill itemises housing");
+  excludes(html, "SUSTENANCE", "the old sustenance model is gone");
+  excludes(html, "HARD CAP", "the old house cap is gone");
+  balanced(html, "div", "the menu markup keeps divs balanced");
+  balanced(html, "span", "the menu markup keeps spans balanced");
+  balanced(html, "button", "the menu markup keeps buttons balanced");
 
-  /* At zero the down stepper is disabled with a reason. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 0, 0)");
   html = context.populationSheetHTML(system);
-  includes(html, 'data-pop-upkeep="housing:-1" disabled', "housing cannot go below zero");
-  includes(html, 'data-pop-upkeep="sustenance:-1" disabled', "sustenance cannot go below zero");
-  includes(html, "Already at zero housing upkeep.", "the housing reason is explained");
-  includes(html, "Starving", "empty sustenance is called starving");
-
-  /* At the planet's size cap the up stepper is disabled. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 8, 2); state.systems.find(function (s) { return s.home; }).population = 7");
-  html = context.populationSheetHTML(system);
-  includes(html, 'data-pop-upkeep="housing:1" disabled', "housing stops at the planet's size");
-  includes(html, "size limit", "the menu names the size limit");
-  run("state.systems.find(function (s) { return s.home; }).population = 3");
-
-  /* Lowering housing below the population is refused in the UI. */
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 2, 2); state.systems.find(function (s) { return s.home; }).population = 4");
-  html = context.populationSheetHTML(system);
-  includes(html, 'data-pop-upkeep="housing:-1" disabled', "the UI blocks an eviction");
-  includes(html, "Housing can't fall below the current population.", "the UI explains the block");
+  excludes(html, "RESET CREWS TO AUTO", "auto orders have no reset button until the player pins a crew");
 }
 
-function testMenuInteractions() {
-  const system = run("freshPopulation()");
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 1)");
+function testPopulationSheetActions() {
+  const system = reset();
+  run("openPopulationSheet(" + JSON.stringify(system.id) + ")");
+  eq(run("state.ui.sheet.kind"), "population", "the population menu opens");
+  includes(els.sheetBody.innerHTML, 'data-pop-upkeep="energy:1"', "the open sheet carries the steppers");
 
-  context.openPopulationSheet(system.id);
-  eq(run("state.ui.sheet.kind"), "population", "the population menu opens from the card");
-  eq(run("state.ui.sheet.systemId"), system.id, "the menu is bound to the colony");
-  eq(els.sheetTitle.textContent, "Population", "the sheet is titled Population");
-  includes(els.sheetKicker.textContent, system.name.toUpperCase(), "the sheet kicker names the colony");
-  includes(els.sheetBody.innerHTML, 'data-pop-upkeep="housing:1"', "the open sheet carries the steppers");
+  eq(context.adjustPopulationUpkeep(system.id, "energy", -1), true, "the energy stepper succeeds");
+  eq(system.maintenance.energy, 90, "the energy policy falls by 10%");
+  includes(els.sheetBody.innerHTML, '<b class="upkeep-step-value">90%</b>', "the sheet repaints the new percentage");
 
-  /* Raising housing repaints the open sheet. */
-  eq(context.adjustPopulationUpkeep(system.id, "housing", 1), true, "the housing stepper succeeds");
-  eq(system.populationUpkeep.housing, 6, "the standing mineral upkeep rises by one step");
-  eq(context.getPopulationHousingCap(system), 6, "a sixth house is funded");
-  includes(els.sheetBody.innerHTML, 'data-pop-upkeep="housing:-1"', "the repainted sheet keeps the minus button");
-  includes(els.sheetBody.innerHTML, "6", "the repainted sheet shows the new upkeep");
+  eq(context.adjustPopulationUpkeep(system.id, "minerals", -1), true, "the housing stepper succeeds");
+  eq(system.maintenance.minerals, 90, "the housing policy falls by 10%");
 
-  /* Raising sustenance repaints too. */
-  eq(context.adjustPopulationUpkeep(system.id, "sustenance", 1), true, "the sustenance stepper succeeds");
-  eq(system.populationUpkeep.sustenance, 2, "the standing energy upkeep rises by one step");
-  eq(context.getWorkforcePlan(system).sustenance.percent, 125, "two energy feed three people with a surplus");
+  /* The legacy axes still map onto the new policy. */
+  eq(context.adjustPopulationUpkeep(system.id, "sustenance", -1), true, "the legacy sustenance axis works");
+  eq(system.maintenance.energy, 80, "sustenance changes energy maintenance");
+  eq(context.adjustPopulationUpkeep(system.id, "housing", -1), true, "the legacy housing axis works");
+  eq(system.maintenance.minerals, 80, "housing changes the mineral investment");
 
-  /* The hard cap refuses an eviction and explains it. */
-  system.population = 6;
-  const before = system.populationUpkeep.housing;
-  eq(context.adjustPopulationUpkeep(system.id, "housing", -1), false, "the eviction step is refused");
-  eq(system.populationUpkeep.housing, before, "the refused step leaves the policy alone");
-  includes(els.sheetBody.innerHTML, "Housing can't fall below the current population.",
-    "the sheet keeps the eviction warning");
-  ok(run("toastMessages").some(function (message) {
-    return message.indexOf("Housing can't fall below") !== -1;
-  }), "the refusal raises a toast");
+  run("setMaintenance(state.systems.find(function (s) { return s.home; }), 0, 0)");
+  includes(context.populationSheetHTML(system), 'data-pop-upkeep="energy:-1" disabled',
+    "the energy stepper stops at zero");
+  includes(context.populationSheetHTML(system), 'data-pop-upkeep="minerals:-1" disabled',
+    "the housing stepper stops at zero");
+  includes(context.populationSheetHTML(system), "Already at 0% maintenance.", "the zero bound is explained");
+
+  run("setMaintenance(state.systems.find(function (s) { return s.home; }), 100, 100)");
+  includes(context.populationSheetHTML(system), 'data-pop-upkeep="energy:1" disabled',
+    "the energy stepper stops at 100%");
+  includes(context.populationSheetHTML(system), 'data-pop-upkeep="minerals:1" disabled',
+    "the housing stepper stops at 100%");
+  includes(context.populationSheetHTML(system), "At the maximum 100% maintenance.", "the gold bound is explained");
 }
 
-function testEconomySheets() {
-  const system = run("freshPopulation()");
-  run("setPolicy(state.systems.find(function (s) { return s.home; }), 4, 2)");
-  run("setSectorStock(homeSectorId(), 'energy', 10); setSectorStock(homeSectorId(), 'minerals', 10);");
+function testWorkerStrategyControls() {
+  const system = reset();
+  system.population = 3;
+  eq(system.workerStrategy, "roundRobin", "the colony starts on round robin");
+  let plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 2, "round robin splits the opening 3 workers 2/1");
+  eq(plan.entries[1].workersAssigned, 1, "the second starter gets the remaining worker");
 
+  let html = context.populationSheetHTML(system);
+  includes(html, 'class="strategy-btn active" data-worker-strategy="roundRobin"',
+    "the round-robin button is active");
+  includes(html, "Share workers across every eligible facility", "the active strategy is explained");
+
+  eq(context.setWorkerStrategy(system.id, "greedy"), true, "the greedy switch succeeds");
+  eq(system.workerStrategy, "greedy", "the colony stores the new strategy");
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 3, "greedy hands all 3 workers to the first facility");
+  eq(plan.entries[1].workersAssigned, 0, "greedy leaves the second facility idle");
+  html = context.populationSheetHTML(system);
+  includes(html, 'class="strategy-btn active" data-worker-strategy="greedy"',
+    "the greedy button is active after the switch");
+  includes(html, "Fill the earliest facility slots first", "the greedy strategy is explained");
+
+  eq(context.setWorkerStrategy(system.id, "bogus"), false, "an unknown strategy is refused");
+  eq(system.workerStrategy, "greedy", "the refused switch leaves the strategy alone");
+
+  /* Explicit orders stay pinned when the strategy changes; reset applies it. */
+  eq(context.setWorkerStrategy(system.id, "roundRobin"), true, "round robin can be selected again");
+  eq(context.adjustFacilityWorkers(system.id, 0, -1), true, "the crew stepper pins the current split");
+  eq(context.hasWorkerOrders(system), true, "the split is now an explicit order");
+  eq(context.getWorkforcePlan(system).entries[0].workersAssigned, 1, "the pinned Power Plant drops to 1");
+  eq(context.getWorkforcePlan(system).entries[1].workersAssigned, 1, "the Mine keeps its 1 worker");
+  eq(context.setWorkerStrategy(system.id, "greedy"), true, "greedy can be selected with pinned crews");
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 1, "pinned orders override the new strategy");
+  eq(plan.entries[1].workersAssigned, 1, "the other pinned crew also stays put");
+  includes(context.populationSheetHTML(system), "Explicit orders are pinned",
+    "the sheet explains that reset is needed");
+  eq(context.resetFacilityWorkers(system.id), true, "the reset action succeeds");
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 3, "the reset applies greedy");
+  eq(plan.entries[1].workersAssigned, 0, "the second facility is idle again");
+}
+
+/* ---------- crew controls ---------- */
+
+function testCrewControls() {
+  const system = reset();
+  system.slots[0] = { type: "mine", level: 1, underConstruction: false };
+  system.slots[1] = { type: "power", level: 1, underConstruction: false };
+  let plan = context.getWorkforcePlan(system);
+  let tile = context.slotTileHTML(system, 0, plan);
+  includes(tile, 'data-facility-workers="0:-1"', "the mine has a crew down button");
+  includes(tile, 'data-facility-workers="0:1"', "the mine has a crew up button");
+  includes(tile, "4/4", "the mine reports its full crew");
+  includes(tile, "ONLINE", "the staffed mine is online");
+  includes(tile, "8 ⛏", "the mine reports its level 1 output");
+
+  eq(context.adjustFacilityWorkers(system.id, 0, -1), true, "the crew action takes a worker");
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 3, "the mine is pinned at three workers");
+  tile = context.slotTileHTML(system, 0, plan);
+  includes(tile, "3/4", "the slot reports the pinned crew");
+  includes(tile, "UNDERSTAFFED", "the slot flags the partial crew");
+
+  run("openPopulationSheet(" + JSON.stringify(system.id) + ")");
+  includes(context.populationSheetHTML(system), 'data-worker-auto="' + system.id + '"',
+    "pinned crews grow a reset button");
+  eq(context.resetFacilityWorkers(system.id), true, "the reset action succeeds");
+  eq(Object.keys(system.workerOrders).length, 0, "the reset clears explicit orders");
+  eq(context.getWorkforcePlan(system).entries[0].workersAssigned, 4,
+    "automatic round robin refills the mine");
+
+  system.slots[0] = { type: "mine", level: 2, underConstruction: false };
+  plan = context.getWorkforcePlan(system);
+  tile = context.slotTileHTML(system, 0, plan);
+  includes(tile, "BLOCKED · NEEDS 15 POPULATION", "a level 2 facility is blocked below 15 population");
+  includes(tile, 'data-facility-workers="0:-1" disabled', "a blocked facility disables its crew controls");
+
+  system.slots[1] = { type: "power", level: 1, underConstruction: true };
+  plan = context.getWorkforcePlan(system);
+  tile = context.slotTileHTML(system, 1, plan);
+  includes(tile, "UNDER CONSTRUCTION", "a building site is marked");
+  includes(tile, "needs 4 workers", "the site reports its future crew");
+  includes(tile, "3 population", "the site reports its future population gate");
+}
+
+/* ---------- build sheet ---------- */
+
+function testBuildSheet() {
+  const system = reset();
+  let html = context.buildSheetHTML(system, 0);
+  includes(html, "needs 4 workers · colony 3+", "the level 1 facility crew and gate are shown");
+  includes(html, "builds at LVL 1 (Primitive)", "the build sheet names the level");
+  includes(html, "+8 ⛏", "the mine's level 1 output is shown");
+  includes(html, "+8 ⚡", "the power plant's level 1 output is shown");
+  includes(html, "Population 12", "the build sheet reads the colony population");
+  includes(html, "free workers", "the build sheet reads the free workforce");
+  balanced(html, "div", "the build sheet keeps divs balanced");
+  balanced(html, "button", "the build sheet keeps buttons balanced");
+
+  run("state.tech.done.push('mineTech1');");
+  html = context.buildSheetHTML(system, 0);
+  includes(html, "needs 6 workers · colony 15+", "the level 2 facility crew and gate are shown");
+  includes(html, "builds at LVL 2 (Industrial)", "the build sheet names the unlocked level");
+  includes(html, "+16 ⛏", "the mine's level 2 output is shown");
+
+  includes(context.buildingYieldText("mine", 1), "4 workers", "the yield text names the crew");
+  includes(context.buildingYieldText("mine", 1), "needs 3 pop", "the yield text names the population gate");
+  includes(context.buildingYieldText("mine", 1), "+8 ⛏", "the yield text names the output");
+  includes(context.buildingYieldText("lab", 1), "1 worker", "support buildings keep their crew text");
+  excludes(context.buildingYieldText("lab", 1), "needs 0 pop", "support buildings have no population line");
+}
+
+/* ---------- resource and details sheets ---------- */
+
+function testResourceAndDetailsSheets() {
+  const system = reset();
   const energySheet = context.resourceSheetHTML("energy");
-  includes(energySheet, "Population sustenance", "the energy sheet lists the sustenance draw");
-  includes(energySheet, "SECTOR UPKEEP", "the energy sheet has an upkeep section");
-
+  includes(energySheet, "Population energy maintenance", "the energy sheet lists the population draw");
+  includes(energySheet, "Population maintenance is paid first", "the energy sheet explains the order");
   const mineralSheet = context.resourceSheetHTML("minerals");
-  includes(mineralSheet, "Population housing", "the mineral sheet lists the housing draw");
-  includes(mineralSheet, "SECTOR UPKEEP", "the mineral sheet now has an upkeep section");
-  includes(mineralSheet, "NET MINERALS / TURN", "the mineral sheet keeps its net row");
+  includes(mineralSheet, "Population housing investment", "the mineral sheet lists the housing draw");
+  includes(mineralSheet, "never overdraws", "the mineral sheet explains the no-negative rule");
 
   const details = context.planetDetailsHTML(system);
+  includes(details, "Happiness", "the details sheet lists happiness");
+  includes(details, "Energy supplied", "the details sheet lists energy supply");
   includes(details, "Housing", "the details sheet lists housing");
-  includes(details, "Sustenance", "the details sheet lists sustenance");
-  includes(details, "Population housing", "the details sheet itemises the mineral draw");
-  includes(details, "Population sustenance", "the details sheet itemises the energy draw");
-  excludes(details, "Residential", "the details sheet drops the residential block");
+  includes(details, "Blocked by population", "the details sheet lists the population gate");
+  includes(details, "Population energy maintenance", "the details sheet itemises the energy draw");
+  includes(details, "Population housing investment", "the details sheet itemises the housing draw");
+  excludes(details, "Population sustenance", "the details sheet no longer uses the old sustenance label");
+  includes(details, "Net local energy", "the details sheet carries the net local energy line");
+  includes(details, "Net local minerals", "the details sheet carries the net local mineral line");
+  balanced(details, "div", "the details sheet keeps divs balanced");
+  balanced(details, "span", "the details sheet keeps spans balanced");
+}
 
-  const build = context.buildSheetHTML(system, 0);
-  excludes(build, "Residential", "the build picker no longer offers a residential block");
-  excludes(build, 'data-build="residential"', "there is no residential build action");
-  includes(build, 'data-build="mine"', "the build picker still offers the mine");
+/* ---------- removed model ---------- */
 
-  run("setSectorStock(homeSectorId(), 'minerals', -2)");
-  const stability = context.stabilitySheetHTML();
-  includes(stability, "Negative sector balance after upkeep", "stability names both deficits");
-  includes(stability, "Solara Core", "the stability sheet lists the sector in deficit");
-  includes(stability, "mineral or energy deficit", "the stability note explains the mineral case");
+function testRemovedModel() {
+  eq(typeof context.getPopulationPolicy, "undefined", "the old housing policy helper is gone");
+  eq(typeof context.getMaxHousingUpkeep, "undefined", "the old housing cap helper is gone");
+  eq(typeof context.getSustenanceState, "undefined", "the old sustenance helper is gone");
+  eq(run("typeof CONFIG.population"), "undefined", "the old population config block is gone");
+  eq(run("typeof CONFIG.economy"), "object", "the colony economy config block exists");
+  eq(run("CONFIG.economy.facilities.levels.length"), 4, "four shared facility levels are configured");
+  eq(run("CONFIG.economy.facilities.levels[3].output"), 64, "level 4 output is 64");
 }
 
 function main() {
-  testCard();
-  testMenu();
-  testMenuInteractions();
-  testEconomySheets();
+  testPopulationCard();
+  testLowPopulationGrowthCopy();
+  testPopulationSheet();
+  testPopulationSheetActions();
+  testWorkerStrategyControls();
+  testCrewControls();
+  testBuildSheet();
+  testResourceAndDetailsSheets();
+  testRemovedModel();
   console.log("population harness: " + checks + " checks passed");
 }
 

@@ -246,6 +246,15 @@ function bindEvents() {
       }
       return;
     }
+    const crewButton = event.target.closest("[data-facility-workers]");
+    if (crewButton) {
+      if (crewButton.disabled || !state.ui.selectedSystem) return;
+      const crewSpec = String(crewButton.getAttribute("data-facility-workers") || "").split(":");
+      if (crewSpec.length === 2) {
+        adjustFacilityWorkers(state.ui.selectedSystem, Number(crewSpec[0]), Number(crewSpec[1]));
+      }
+      return;
+    }
     const refitButton = event.target.closest("[data-upgrade-building]");
     if (refitButton) {
       if (refitButton.disabled || !state.ui.selectedSystem) return;
@@ -313,6 +322,16 @@ function bindEvents() {
       if (spec.length === 2) {
         adjustPopulationUpkeep(state.ui.sheet.systemId, spec[0], Number(spec[1]));
       }
+      return;
+    }
+    const strategyButton = event.target.closest("[data-worker-strategy]");
+    if (strategyButton && state.ui.sheet && state.ui.sheet.kind === "population") {
+      setWorkerStrategy(state.ui.sheet.systemId, strategyButton.getAttribute("data-worker-strategy"));
+      return;
+    }
+    const workerAuto = event.target.closest("[data-worker-auto]");
+    if (workerAuto && state.ui.sheet && state.ui.sheet.kind === "population") {
+      resetFacilityWorkers(state.ui.sheet.systemId);
       return;
     }
     const button = event.target.closest("[data-build]");

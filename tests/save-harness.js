@@ -34,6 +34,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",
@@ -183,9 +184,11 @@ function testSnapshotRoundTrip() {
     "testShip.hull = 3;" +
     "testShip.upgrades.power = 1;" +
     "const home = state.systems.find(function (system) { return system.home; });" +
-    "home.population = 4;" +
-    "home.populationUpkeep.housing = 2;" +
-    "home.populationUpkeep.sustenance = 2;" +
+    "home.population = 20;" +
+    "home.maintenance.energy = 40;" +
+    "home.maintenance.minerals = 60;" +
+    "home.workerStrategy = 'greedy';" +
+    "home.workerOrders = { 0: 3, 1: 4 };" +
     "home.growthProgress = 0.5;" +
     "state.military.kills = 3;" +
     "state.military.battles = 2;" +
@@ -209,7 +212,7 @@ function testSnapshotRoundTrip() {
   ok(text.length > 10000, "the snapshot is a full JSON dump, not a bookmark (" + text.length + " bytes)");
   const raw = JSON.parse(text);
   eq(raw.format, "stellar-dominion-save", "the snapshot carries the save format id");
-  eq(raw.version, 1, "the snapshot carries the format version");
+  eq(raw.version, 2, "the snapshot carries the format version");
   eq(raw.state.turn, 7, "the turn is in the snapshot");
   ok(typeof raw.savedAt === "string" && raw.savedAt.length > 10, "the snapshot records when it was made");
   ok(typeof raw.rngStreams.events === "number" && typeof raw.rngStreams.military === "number",
@@ -241,6 +244,13 @@ function testSnapshotRoundTrip() {
     .fleets["2,3"][0];
   eq(ship.hull, 3, "ship hull damage is saved");
   eq(ship.upgrades.power, 1, "ship refit levels are saved");
+  const restoredHome = restored.systems.find(function (system) { return system.home; });
+  eq(restoredHome.population, 20, "the colony population is saved");
+  eq(restoredHome.maintenance.energy, 40, "the energy maintenance percentage is saved");
+  eq(restoredHome.maintenance.minerals, 60, "the housing investment percentage is saved");
+  eq(restoredHome.workerStrategy, "greedy", "the automatic crew strategy is saved");
+  eq(restoredHome.workerOrders[0], 3, "pinned worker orders are saved");
+  eq(restoredHome.growthProgress, 0.5, "banked population growth is saved");
 }
 
 /* ---------- RNG and event deck continuation ---------- */

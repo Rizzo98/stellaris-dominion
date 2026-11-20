@@ -1,41 +1,52 @@
 /* ============================================================
    BUILDINGS — structures that occupy a colony slot
    Output, upkeep, worker demand and build cost per type.
-   Housing is no longer a building: it is paid for with the colony's
-   mineral population upkeep (see CONFIG.population and core/colony.js).
 
-   Levels: every building has a level that starts at 1. A completed
-   Building category tech raises the level the building MAY be refitted to
-   (2, 3 and 4). 'output' is the level 1 yield and 'perLevel' is the extra
-   yield added by every level above 1, so a Mine reads 3 / 4 / 5 / 6 ⛏.
-   The refit is a manual order paid on the colony screen: a tech never
-   upgrades a standing building by itself.
+   Power Plants and Mines are the two production facilities. Their four
+   levels are shared and live in CONFIG.economy.facilities.levels: a level
+   grants one resource output for one worker requirement and needs a minimum
+   colony population before it can operate at all. The same table is attached
+   to both definitions so refits, tooltips and the tech tree read identical
+   numbers.
+
+   Labs and Embassies are support buildings: they still use the older
+   output/perLevel table, need one worker and pay energy upkeep, but they are
+   not part of the facility level gate.
+
+   Levels: every building starts at level 1. A completed Building category
+   tech raises the level the building MAY be refitted to (2, 3 and 4). The
+   refit is a manual order paid on the colony screen: a tech never upgrades a
+   standing building by itself.
    ============================================================ */
+
+const FACILITY_LEVELS = CONFIG.economy.facilities.levels;
 
 const BUILDINGS = {
   mine: {
     id: "mine",
     name: "Mine",
     emoji: "⛏️",
-    desc: "Cuts ore from the crust. Two crews run a full shift.",
+    desc: "Cuts ore from the crust. Higher levels automate the seams but need a bigger colony to crew them.",
     cost: { minerals: 5 },
-    output: { minerals: 3 },
-    perLevel: { minerals: 1 },
+    resource: "minerals",
+    facility: true,
+    levels: FACILITY_LEVELS,
     maxLevel: 4,
-    energyUpkeep: 1,
-    workers: 2
+    energyUpkeep: 0,
+    workers: FACILITY_LEVELS[0].workers
   },
   power: {
     id: "power",
     name: "Power Plant",
     emoji: "🏭",
-    desc: "Feeds the colony grid.",
+    desc: "Feeds the colony grid. Higher levels are far more efficient per worker.",
     cost: { minerals: 5 },
-    output: { energy: 4 },
-    perLevel: { energy: 1 },
+    resource: "energy",
+    facility: true,
+    levels: FACILITY_LEVELS,
     maxLevel: 4,
     energyUpkeep: 0,
-    workers: 1
+    workers: FACILITY_LEVELS[0].workers
   },
   lab: {
     id: "lab",

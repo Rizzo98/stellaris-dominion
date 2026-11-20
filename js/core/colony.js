@@ -1,6 +1,9 @@
 /* ============================================================
-   COLONY RULES — planet size, population, workforce and slots
+   COLONY RULES — planet size, workforce, slots and colonization
    Everything that answers 'what can this colony support right now?'.
+   The economic formulas (maintenance, housing, happiness, growth) live in
+   core/colony-economy.js; this file decides which facilities can operate and
+   which workers are assigned to them.
    ============================================================ */
 
 /* A planet's size is rolled with the galaxy (25 / 50 / 25). Standard slots
@@ -74,244 +77,215 @@ function getSlotUnlockBlockReason(system, index) {
   return null;
 }
 
-/* ---------- population: houses and sustenance ---------- */
+/* ---------- workforce allocation ---------- */
 
-/* Housing is bought with a standing mineral upkeep. One step of upkeep adds
-   one house, and a planet can pay for at most its size in extra houses; the
-   founding shelter is free. */
-function getPopulationHousingUpkeepStep() {
-  const cfg = (CONFIG.population && CONFIG.population.housing) || {};
-  return Math.max(1, Math.floor(cfg.mineralsPerHouse || 2));
+/* Explicit orders live on the colony as { slotIndex: workers }. An absent
+   order means 'use this colony's automatic strategy', so a colony works
+   without micro-management and a player can still pin a crew where it
+   matters. */
+function getWorkerOrders(system) {
+  if (!system || typeof system !== "object") return {};
+  if (!system.workerOrders || typeof system.workerOrders !== "object" || Array.isArray(system.workerOrders)) {
+    system.workerOrders = {};
+  }
+  return system.workerOrders;
 }
 
-function getPopulationSustenanceConfig() {
-  const cfg = (CONFIG.population && CONFIG.population.sustenance) || {};
-  const maxMult = typeof cfg.maxMult === "number" && cfg.maxMult >= 1 ? cfg.maxMult : 1.25;
-  return {
-    populationPerEnergy: typeof cfg.populationPerEnergy === "number" && cfg.populationPerEnergy > 0
-      ? cfg.populationPerEnergy
-      : 2,
-    maxMult: maxMult,
-    tiers: Array.isArray(cfg.tiers) ? cfg.tiers : [{ id: "starving", label: "STARVING", min: 0 }]
+function hasWorkerOrders(system) {
+  return Object.keys(getWorkerOrders(system)).length > 0;
+}
+
+function clearWorkerOrders(system) {
+  if (!system) return false;
+  system.workerOrders = {};
+  return true;
+}
+
+/* Automatic crew strategies. Round robin hands out one worker at a time to
+   every eligible facility (3 people across two 4-worker facilities = 2/1);
+   greedy fills the earliest facilities first (3/0). Explicit orders always
+   win because the player pinned them. */
+function getWorkerStrategy(system) {
+  const cfg = getEconomyConfig();
+  const ids = (cfg.workerStrategies || []).map(function (entry) { return entry.id; });
+  const fallback = cfg.defaultWorkerStrategy || "roundRobin";
+  const raw = system && system.workerStrategy;
+  return ids.indexOf(raw) !== -1 ? raw : fallback;
+}
+
+function getWorkerStrategyLabel(strategy) {
+  const cfg = getEconomyConfig();
+  const found = (cfg.workerStrategies || []).find(function (entry) { return entry.id === strategy; });
+  return found ? found.label : String(strategy || "").toUpperCase();
+}
+
+/* The plan resolves every completed building to a crew. Production facilities
+   are locked below their minimum colony population; support buildings are
+   always available. Automatic workers follow the colony's strategy and can
+   never exceed the population; explicit orders are applied first and are
+   always capped by the remaining people. */
+function getWorkforcePlan(system) {
+  const strategy = getWorkerStrategy(system);
+  const plan = {
+    population: getColonyPopulation(system),
+    strategy: strategy,
+    jobsTotal: 0,
+    jobsStaffed: 0,
+    idleJobs: 0,
+    assignedWorkers: 0,
+    availableWorkers: 0,
+    freeWorkers: 0,
+    idleBuildings: 0,
+    partialBuildings: 0,
+    blockedBuildings: 0,
+    blockedJobs: 0,
+    hasOrders: false,
+    entries: []
   };
-}
+  if (!system || !system.colonized) return plan;
 
-function getMaxExtraHouses(system) {
-  if (!system || !system.colonized) return 0;
-  return Math.max(0, getStandardSlots(system));
-}
+  const orders = getWorkerOrders(system);
+  plan.hasOrders = Object.keys(orders).length > 0;
+  let available = plan.population;
+  const entries = [];
 
-function getMaxHousingUpkeep(system) {
-  return getMaxExtraHouses(system) * getPopulationHousingUpkeepStep();
-}
+  (system.slots || []).forEach(function (slot, index) {
+    if (!slot) return;
+    const level = getBuildingLevel(slot);
+    const required = getBuildingWorkers(slot.type, level);
+    const minPopulation = getBuildingMinPopulation(slot.type, level);
+    const entry = {
+      index: index,
+      type: slot.type,
+      level: level,
+      levelName: getBuildingLevelName(slot.type, level),
+      underConstruction: !!slot.underConstruction,
+      active: false,
+      eligible: false,
+      minPopulation: minPopulation,
+      workersRequired: required,
+      workersAssigned: 0,
+      staffedRatio: 0,
+      explicit: Object.prototype.hasOwnProperty.call(orders, index)
+    };
 
-/* The cap has to be enough to feed the biggest population the planet can
-   house while still reaching the top sustenance tier. */
-function getMaxSustenanceUpkeep(system) {
-  if (!system || !system.colonized) return 0;
-  const cfg = getPopulationSustenanceConfig();
-  const maxPopulation = getBasePopulationCap(system) + getMaxExtraHouses(system);
-  return Math.max(1, Math.ceil((maxPopulation * cfg.maxMult) / cfg.populationPerEnergy - 1e-9));
-}
-
-/* The colony's standing upkeep policy. Values are whole upkeep units per
-   turn: housing is paid in minerals, sustenance in energy. The object is
-   created lazily and clamped on read, so generated or older systems always
-   report a valid policy. */
-function getPopulationPolicy(system) {
-  if (!system.populationUpkeep || typeof system.populationUpkeep !== "object") {
-    system.populationUpkeep = { housing: 0, sustenance: 0 };
-  }
-  const policy = system.populationUpkeep;
-  const housingMax = getMaxHousingUpkeep(system);
-  const sustenanceMax = getMaxSustenanceUpkeep(system);
-  const housing = typeof policy.housing === "number" && isFinite(policy.housing) ? policy.housing : 0;
-  const sustenance = typeof policy.sustenance === "number" && isFinite(policy.sustenance) ? policy.sustenance : 0;
-  policy.housing = clamp(Math.floor(housing), 0, housingMax);
-  policy.sustenance = clamp(Math.floor(sustenance), 0, sustenanceMax);
-  return policy;
-}
-
-/* The housing cap a given mineral upkeep would fund, used by the menu
-   preview and by the guard that stops a colony losing its houses. */
-function getHousingCapForUpkeep(system, housingUpkeep) {
-  if (!system || !system.colonized) return 0;
-  const step = getPopulationHousingUpkeepStep();
-  const paidHouses = Math.floor(Math.max(0, housingUpkeep) / step);
-  return getBasePopulationCap(system) + Math.min(paidHouses, getMaxExtraHouses(system));
-}
-
-function getPopulationHousingCap(system) {
-  const policy = getPopulationPolicy(system);
-  return getHousingCapForUpkeep(system, policy.housing);
-}
-
-function getSustenanceSupply(upkeep) {
-  const cfg = getPopulationSustenanceConfig();
-  return Math.max(0, upkeep || 0) * cfg.populationPerEnergy;
-}
-
-function getSustenanceDemand(population) {
-  return Math.max(0, population || 0);
-}
-
-function getSustenanceTier(mult) {
-  const tiers = getPopulationSustenanceConfig().tiers;
-  for (let i = 0; i < tiers.length; i += 1) {
-    if (typeof tiers[i].min !== "number" || mult >= tiers[i].min) return tiers[i];
-  }
-  return tiers[tiers.length - 1];
-}
-
-/* Sustenance is the share of the population that the energy upkeep can feed,
-   expressed as a growth multiplier. Feeding everyone is 100%; surplus food
-   and entertainment lift growth up to maxMult (125%), and a shortage drags it
-   down. It is always clamped to the top tier. */
-function getSustenanceState(population, upkeep) {
-  const cfg = getPopulationSustenanceConfig();
-  const supply = getSustenanceSupply(upkeep);
-  const demand = getSustenanceDemand(population);
-  const ratio = demand > 0 ? supply / demand : cfg.maxMult;
-  const mult = clamp(ratio, 0, cfg.maxMult);
-  return {
-    supply: supply,
-    demand: demand,
-    ratio: ratio,
-    capped: ratio > cfg.maxMult,
-    mult: mult,
-    percent: Math.round(mult * 100),
-    maxPercent: Math.round(cfg.maxMult * 100),
-    populationPerEnergy: cfg.populationPerEnergy,
-    tier: getSustenanceTier(mult)
-  };
-}
-
-/* Why a stepper move is illegal: out of bounds, or a housing cut that would
-   leave more people than houses. Null means the move is allowed. */
-function getPopulationUpkeepChangeReason(system, axis, delta) {
-  if (!system || !system.colonized) return "Only a colony manages population.";
-  if (axis !== "housing" && axis !== "sustenance") return "Unknown population upkeep.";
-  const policy = getPopulationPolicy(system);
-  const step = axis === "housing" ? getPopulationHousingUpkeepStep() : 1;
-  const max = axis === "housing" ? getMaxHousingUpkeep(system) : getMaxSustenanceUpkeep(system);
-  const next = clamp(policy[axis] + (delta < 0 ? -step : step), 0, max);
-  if (next === policy[axis]) {
-    return delta > 0
-      ? "At the maximum " + axis + " upkeep."
-      : "Already at zero " + axis + " upkeep.";
-  }
-  if (axis === "housing" && next < policy.housing) {
-    const nextCap = getHousingCapForUpkeep(system, next);
-    if (nextCap < Math.max(0, system.population || 0)) {
-      return "Housing can't fall below the current population.";
+    if (slot.underConstruction) {
+      entries.push(entry);
+      return;
     }
+
+    entry.eligible = plan.population >= minPopulation;
+    if (entry.explicit) {
+      const raw = Number(orders[index]);
+      const clamped = clamp(Math.floor(isFinite(raw) ? raw : 0), 0, required);
+      if (clamped !== raw) orders[index] = clamped;
+      const desired = entry.eligible ? clamped : 0;
+      const assigned = Math.min(desired, Math.max(0, available));
+      available -= assigned;
+      entry.workersAssigned = assigned;
+    }
+    entries.push(entry);
+  });
+
+  /* Automatic workers go only to completed, eligible facilities without a
+     pinned order. Greedy respects slot order; round robin shares the pool. */
+  const automatic = entries.filter(function (entry) {
+    return !entry.underConstruction && entry.eligible && !entry.explicit;
+  });
+  if (strategy === "greedy") {
+    automatic.forEach(function (entry) {
+      const assigned = Math.min(entry.workersRequired, Math.max(0, available));
+      entry.workersAssigned = assigned;
+      available -= assigned;
+    });
+  } else {
+    let progress = true;
+    while (available > 0 && progress) {
+      progress = false;
+      automatic.forEach(function (entry) {
+        if (available <= 0) return;
+        if (entry.workersAssigned >= entry.workersRequired) return;
+        entry.workersAssigned += 1;
+        available -= 1;
+        progress = true;
+      });
+    }
+  }
+
+  entries.forEach(function (entry) {
+    if (entry.underConstruction) return;
+    const assigned = entry.workersAssigned;
+    entry.staffedRatio = entry.workersRequired > 0 ? assigned / entry.workersRequired : 1;
+    entry.active = entry.eligible && (entry.workersRequired === 0 || assigned > 0);
+
+    plan.jobsTotal += entry.workersRequired;
+    plan.jobsStaffed += assigned;
+    plan.assignedWorkers += assigned;
+    if (!entry.eligible) {
+      plan.blockedBuildings += 1;
+      plan.blockedJobs += entry.workersRequired;
+    } else if (entry.workersRequired > 0 && assigned === 0) {
+      plan.idleBuildings += 1;
+    } else if (entry.workersRequired > 0 && assigned < entry.workersRequired) {
+      plan.partialBuildings += 1;
+    }
+  });
+
+  plan.entries = entries;
+  plan.availableWorkers = Math.max(0, available);
+  plan.freeWorkers = plan.availableWorkers;
+  plan.idleJobs = Math.max(0, plan.jobsTotal - plan.jobsStaffed);
+  return plan;
+}
+
+function findWorkforceEntry(plan, index) {
+  return (plan.entries || []).find(function (entry) { return entry.index === index; }) || null;
+}
+
+/* A stepper press on one facility. It becomes an explicit order for every
+   eligible completed building (so the rest of the crew stays where the
+   player can see it), then moves one worker. The plan's capacity guard is
+   the same one the renderer reads. */
+function getFacilityWorkerChangeReason(system, index, delta) {
+  if (!system || !system.colonized) return "Only a colony assigns workers.";
+  const plan = getWorkforcePlan(system);
+  const entry = findWorkforceEntry(plan, index);
+  if (!entry || entry.underConstruction) return "This facility is not online yet.";
+  if (!entry.eligible) {
+    return "Needs " + entry.minPopulation + " population to operate.";
+  }
+  const next = clamp(entry.workersAssigned + (delta < 0 ? -1 : 1), 0, entry.workersRequired);
+  if (next === entry.workersAssigned) {
+    return delta > 0
+      ? "This facility already has its full crew."
+      : "No workers are assigned here.";
+  }
+  if (delta > 0 && plan.availableWorkers <= 0) {
+    return "No free workers. Reassign a facility first.";
   }
   return null;
 }
 
-/* Workers are assigned in slot order. A building keeps whatever workers it
-   gets, so a 2-worker mine with one crew runs at 50%. Completed buildings
-   always pay their full upkeep, even when no worker is available. Population
-   growth comes from the houses and sustenance bought with the colony's
-   standing upkeep, not from any building. */
-function getWorkforcePlan(system) {
-  const plan = {
-    population: system.colonized ? Math.max(0, system.population || 0) : 0,
-    baseHousing: getBasePopulationCap(system),
-    housingUpkeep: 0,
-    paidHouses: 0,
-    cap: 0,
-    housingRoom: 0,
-    overcrowded: false,
-    sustenanceUpkeep: 0,
-    sustenance: getSustenanceState(0, 0),
-    growthMultiplier: 0,
-    growthRate: (CONFIG.population && CONFIG.population.growthRate) || 0,
-    growthPerTurn: 0,
-    growthProgress: 0,
-    turnsToNextPop: null,
-    canGrow: false,
-    growthBlockedBy: "housing",
-    jobsTotal: 0,
-    jobsStaffed: 0,
-    idleJobs: 0,
-    idleBuildings: 0,
-    partialBuildings: 0,
-    availableWorkers: 0,
-    entries: []
-  };
-
-  if (!system.colonized) {
-    plan.cap = 0;
-    plan.growthBlockedBy = "housing";
-    return plan;
+function adjustFacilityWorkersOrder(system, index, delta) {
+  const reason = getFacilityWorkerChangeReason(system, index, delta);
+  if (reason) return { ok: false, reason: reason };
+  const plan = getWorkforcePlan(system);
+  const entry = findWorkforceEntry(plan, index);
+  const orders = getWorkerOrders(system);
+  if (!plan.hasOrders) {
+    /* Pin the crews the player can see. A blocked or unfinished facility
+       stays on automatic staffing so it can fill itself once the colony
+       reaches its population gate. */
+    plan.entries.forEach(function (other) {
+      if (!other.underConstruction && other.eligible) orders[other.index] = other.workersAssigned;
+    });
   }
-
-  const policy = getPopulationPolicy(system);
-  plan.housingUpkeep = policy.housing;
-  plan.sustenanceUpkeep = policy.sustenance;
-  plan.paidHouses = Math.floor(policy.housing / getPopulationHousingUpkeepStep());
-  plan.cap = plan.baseHousing + plan.paidHouses;
-  plan.sustenance = getSustenanceState(plan.population, policy.sustenance);
-  plan.growthMultiplier = plan.sustenance.mult;
-  plan.housingRoom = Math.max(0, plan.cap - plan.population);
-  plan.overcrowded = plan.population > plan.cap;
-
-  let available = plan.population;
-  (system.slots || []).forEach(function (slot, index) {
-    if (!slot) return;
-    const required = getBuildingWorkers(slot.type);
-    const entry = {
-      index: index,
-      type: slot.type,
-      underConstruction: !!slot.underConstruction,
-      active: false,
-      workersRequired: required,
-      workersAssigned: 0,
-      staffedRatio: 0
-    };
-
-    if (!slot.underConstruction) {
-      const assigned = Math.min(required, available);
-      available -= assigned;
-      entry.workersAssigned = assigned;
-      entry.staffedRatio = required > 0 ? assigned / required : 1;
-      entry.active = required === 0 || assigned > 0;
-      plan.jobsTotal += required;
-      plan.jobsStaffed += assigned;
-      if (required > 0 && assigned === 0) {
-        plan.idleBuildings += 1;
-      } else if (required > 0 && assigned < required) {
-        plan.partialBuildings += 1;
-      }
-    }
-    plan.entries.push(entry);
-  });
-
-  plan.availableWorkers = available;
-  plan.idleJobs = plan.jobsTotal - plan.jobsStaffed;
-  plan.growthProgress = clamp(system.growthProgress || 0, 0, 1);
-
-  /* The hard limit: no colony may hold more people than houses. A negative
-     policy change is refused, but a stale state still reports the overflow so
-     growPopulations() can settle it. */
-  if (plan.overcrowded) {
-    plan.growthBlockedBy = "overcrowded";
-  } else if (plan.housingRoom <= 0) {
-    plan.growthBlockedBy = "housing";
-  } else if (plan.growthMultiplier <= 0) {
-    plan.growthBlockedBy = "sustenance";
-  } else {
-    plan.growthBlockedBy = null;
-    const fill = plan.housingRoom / plan.cap;
-    plan.growthPerTurn = plan.growthRate * plan.growthMultiplier * fill;
-    plan.canGrow = plan.growthPerTurn > 0;
-    plan.turnsToNextPop = plan.canGrow
-      ? Math.max(1, Math.ceil((1 - plan.growthProgress) / plan.growthPerTurn))
-      : null;
-  }
-  return plan;
+  const next = clamp(entry.workersAssigned + (delta < 0 ? -1 : 1), 0, entry.workersRequired);
+  orders[index] = next;
+  return { ok: true, reason: null, workers: next, plan: getWorkforcePlan(system) };
 }
+
+/* ---------- slots, attention and colonization ---------- */
 
 function getEmptyUnlockedSlots(system) {
   if (!system.colonized) return 0;

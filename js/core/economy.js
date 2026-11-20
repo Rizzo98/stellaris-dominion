@@ -6,6 +6,11 @@
    getPlanetBreakdown() explains one colony, getSectorEconomy() one sector,
    getEconomy() the whole empire. Event drawing lives in
    core/event-engine.js; gate-linked transfers live in core/trade.js.
+
+   Population maintenance is resolved by core/colony-economy.js. This file
+   turns those reports into ledger lines, and it never lets a sector stock go
+   below zero: a colony that cannot afford its maintenance spends what is
+   there and reports lower happiness instead.
    ============================================================ */
 
 function addEntry(list, label, amount, sub) {
@@ -19,22 +24,29 @@ function roundIncome(value) {
 
 function buildingWorkerSub(stat) {
   if (!stat.workersRequired) return "";
-  return stat.workersAssigned + "/" + stat.workersRequired + " workers" +
-    (stat.workersAssigned < stat.workersRequired ? " · understaffed" : "");
+  const base = stat.workersAssigned + "/" + stat.workersRequired + " workers";
+  if (stat.workersAssigned < stat.workersRequired) return base + " · understaffed";
+  return base;
 }
 
 /* Every building carries its own level, so the ledger tells the player which
    refit the yield came from instead of assuming a researched tech applies. */
-function buildingLevelSub(level) {
+function buildingLevelSub(type, level) {
   if (!level || level <= 1) return "";
-  return "LVL " + level;
+  const levelName = getBuildingLevelName(type, level);
+  return "LVL " + level + (levelName ? " · " + levelName.toUpperCase() : "");
 }
 
-/* Local (pre-empire-modifier) production for the planet screen and details.
-   Production scales with assigned workers; upkeep is always charged for a
-   completed building, whether or not anyone is working in it. Population adds
-   two standing upkeeps: minerals for houses and energy for sustenance. */
-function getPlanetBreakdown(system) {
+function formatEconomic(value) {
+  return formatAmount(Math.round(value * 100) / 100);
+}
+
+/* Local production for the planet screen and details. Production is
+   staffed-facility output; upkeep is the standing colony overhead and the
+   energy requested by the colony's maintenance policy. The population report
+   also carries the actual spend, happiness and growth calculated for the
+   current ledger. */
+function getPlanetBreakdown(system, reportOverride) {
   const output = { energy: 0, minerals: 0, research: 0, influence: 0 };
   const counts = { mine: 0, power: 0, lab: 0, embassy: 0 };
   const typeStats = {};
@@ -44,14 +56,17 @@ function getPlanetBreakdown(system) {
   let buildingUpkeep = 0;
   let builtCount = 0;
   const activeBuildings = [];
-  const populationEnergyUpkeep = workforce.sustenanceUpkeep;
-  const populationMineralUpkeep = workforce.housingUpkeep;
-
-  if (system.colonized && system.home) {
-    output.energy += CONFIG.baseIncome.energy;
-    output.minerals += CONFIG.baseIncome.minerals;
-    output.research += CONFIG.baseIncome.research;
+  let report = reportOverride;
+  if (!report) {
+    const allocations = system && system.sectorId != null
+      ? getSectorColonyAllocations(system.sectorId)
+      : null;
+    report = allocations && allocations.byId[system.id]
+      ? allocations.byId[system.id]
+      : getColonyEconomy(system);
   }
+  const populationEnergyUpkeep = report.energyRequested;
+  const populationMineralUpkeep = report.mineralsRequested;
 
   if (system.colonized) {
     (system.slots || []).forEach(function (slot, index) {
@@ -62,23 +77,28 @@ function getPlanetBreakdown(system) {
       const upkeep = getBuildingUpkeep(slot.type);
       const ratio = !slot.underConstruction && planEntry ? planEntry.staffedRatio : 0;
       const assigned = planEntry ? planEntry.workersAssigned : 0;
-      const required = planEntry ? planEntry.workersRequired : getBuildingWorkers(slot.type);
+      const required = planEntry ? planEntry.workersRequired : getBuildingWorkers(slot.type, level);
+      const minPopulation = planEntry ? planEntry.minPopulation : getBuildingMinPopulation(slot.type, level);
       activeBuildings.push({
         index: index,
         type: slot.type,
         level: level,
+        levelName: getBuildingLevelName(slot.type, level),
         underConstruction: !!slot.underConstruction,
+        eligible: planEntry ? planEntry.eligible : true,
         active: !slot.underConstruction && ratio > 0,
         workersRequired: required,
         workersAssigned: assigned,
         staffedRatio: ratio,
+        minPopulation: minPopulation,
         output: out,
         upkeep: upkeep
       });
       if (slot.underConstruction) return;
       builtCount += 1;
       counts[slot.type] = (counts[slot.type] || 0) + 1;
-      /* Completed buildings pay upkeep even with no workers. */
+
+      /* Completed buildings pay their energy upkeep even with no workers. */
       buildingUpkeep += upkeep;
 
       const stat = typeStats[slot.type] || {
@@ -86,16 +106,19 @@ function getPlanetBreakdown(system) {
         level: 1,
         workersAssigned: 0,
         workersRequired: 0,
+        minPopulation: 0,
+        blocked: 0,
         output: { energy: 0, minerals: 0, research: 0, influence: 0 }
       };
       stat.count += 1;
       stat.level = Math.max(stat.level || 1, level);
       stat.workersAssigned += assigned;
       stat.workersRequired += required;
+      stat.minPopulation = Math.max(stat.minPopulation || 0, minPopulation);
+      if (!slot.underConstruction && planEntry && !planEntry.eligible) stat.blocked += 1;
       ["energy", "minerals", "research", "influence"].forEach(function (key) {
         const scaled = (out[key] || 0) * ratio;
         stat.output[key] += scaled;
-        output[key] += scaled;
       });
       typeStats[slot.type] = stat;
     });
@@ -120,17 +143,23 @@ function getPlanetBreakdown(system) {
     if (!stat || !source) return;
     const amount = stat.output[source.key] || 0;
     if (!amount) return;
-    const sub = [buildingWorkerSub(stat), buildingLevelSub(stat.level)].filter(Boolean).join(" · ");
+    const sub = [buildingWorkerSub(stat), buildingLevelSub(type, stat.level)].filter(Boolean).join(" · ");
     addEntry(sources[source.key], source.label + " ×" + stat.count, amount, sub);
+  });
+
+  Object.keys(report.production.resources).forEach(function (key) {
+    if (key === "energy" || key === "minerals" || key === "research" || key === "influence") {
+      output[key] = report.production.resources[key] || 0;
+    }
   });
 
   const colonyUpkeep = system.colonized ? CONFIG.colonyEnergyUpkeep : 0;
   const upkeepItems = [];
   if (colonyUpkeep) addEntry(upkeepItems, "Colony overhead", colonyUpkeep);
   if (populationEnergyUpkeep) {
-    const sust = workforce.sustenance;
-    addEntry(upkeepItems, "Population sustenance", populationEnergyUpkeep,
-      sust.percent + "% · feeds " + sust.supply + " of " + sust.demand);
+    addEntry(upkeepItems, "Population energy maintenance", populationEnergyUpkeep,
+      report.request.energyPercent + "% funded · " + formatEconomic(report.energySpent) +
+      " of " + formatEconomic(report.energyRequired) + " ⚡ supplied");
   }
   BUILDING_ORDER.forEach(function (type) {
     const count = counts[type] || 0;
@@ -142,13 +171,15 @@ function getPlanetBreakdown(system) {
 
   const mineralUpkeepItems = [];
   if (populationMineralUpkeep) {
-    addEntry(mineralUpkeepItems, "Population housing", populationMineralUpkeep,
-      workforce.paidHouses + (workforce.paidHouses === 1 ? " house" : " houses") + " paid");
+    addEntry(mineralUpkeepItems, "Population housing investment", populationMineralUpkeep,
+      report.request.mineralsPercent + "% funded · H " + formatEconomic(report.housingCapacity) +
+      " for " + report.population + " population");
   }
   const populationUpkeep = {
     energy: populationEnergyUpkeep,
     minerals: populationMineralUpkeep
   };
+  const infrastructureUpkeep = colonyUpkeep + buildingUpkeep;
 
   return {
     output: output,
@@ -157,19 +188,31 @@ function getPlanetBreakdown(system) {
     typeStats: typeStats,
     activeBuildings: activeBuildings,
     builtCount: builtCount,
-    population: workforce.population,
-    populationCap: workforce.cap,
+    population: report.population,
     workforce: workforce,
+    colony: report,
+    populationMaintenance: report,
     populationUpkeep: populationUpkeep,
+    happiness: report.happiness,
+    tier: report.tier,
+    housingCapacity: report.housingCapacity,
+    housingDeficit: report.housingDeficit,
+    energyFulfillment: report.energyFulfillment,
+    growthAmount: report.growthAmount,
+    growthBlockedBy: report.growthBlockedBy,
     idleJobs: workforce.idleJobs,
     idleBuildings: workforce.idleBuildings,
     partialBuildings: workforce.partialBuildings,
+    blockedBuildings: workforce.blockedBuildings,
     colonyUpkeep: colonyUpkeep,
     buildingUpkeep: buildingUpkeep,
-    upkeep: colonyUpkeep + buildingUpkeep + populationEnergyUpkeep,
+    infrastructureUpkeep: infrastructureUpkeep,
+    upkeep: infrastructureUpkeep + populationEnergyUpkeep,
     mineralUpkeep: populationMineralUpkeep,
     upkeepItems: upkeepItems,
-    mineralUpkeepItems: mineralUpkeepItems
+    mineralUpkeepItems: mineralUpkeepItems,
+    localNetEnergy: output.energy - (infrastructureUpkeep + populationEnergyUpkeep),
+    localNetMinerals: output.minerals - populationMineralUpkeep
   };
 }
 
@@ -186,18 +229,19 @@ function getSectorLedger(sectorId) {
 
 function getSectorStock(sectorId, key) {
   const ledger = getSectorLedger(sectorId);
-  return typeof ledger[key] === "number" ? ledger[key] : 0;
+  return typeof ledger[key] === "number" && isFinite(ledger[key]) ? ledger[key] : 0;
 }
 
+/* A ledger is never allowed below zero. Turn upkeep and actions both call
+   this path, so an overdraw becomes a shortfall in the caller instead of an
+   invalid balance. */
 function setSectorStock(sectorId, key, value) {
   const ledger = getSectorLedger(sectorId);
-  ledger[key] = value;
+  const numeric = typeof value === "number" && isFinite(value) ? value : 0;
+  ledger[key] = Math.max(0, numeric);
   return ledger[key];
 }
 
-/* Energy and minerals may sit in the red after a sector pays its standing
-   upkeep. Mineral actions stay affordability-gated, so a negative stock simply
-   blocks new work until income refills it. */
 function addSectorStock(sectorId, key, amount) {
   if (!amount) return getSectorStock(sectorId, key);
   return setSectorStock(sectorId, key, getSectorStock(sectorId, key) + amount);
@@ -212,8 +256,8 @@ function getSectorCarry(sectorId) {
 
 function canSectorAfford(sectorId, cost) {
   const wanted = cost || {};
-  if ((wanted.energy || 0) > getSectorStock(sectorId, "energy")) return false;
-  if ((wanted.minerals || 0) > getSectorStock(sectorId, "minerals")) return false;
+  if ((wanted.energy || 0) > getSectorStock(sectorId, "energy") + 1e-9) return false;
+  if ((wanted.minerals || 0) > getSectorStock(sectorId, "minerals") + 1e-9) return false;
   return true;
 }
 
@@ -237,13 +281,15 @@ function getEconomySectorId() {
   return home ? home.sectorId : (state.galaxy.sectors[0] ? state.galaxy.sectors[0].id : null);
 }
 
-/* Sectors whose energy or mineral stock is in the red after upkeep. One
-   deficit is enough to cost stability, so the sheet needs the whole list. */
+/* Sectors whose current stock cannot cover their projected infrastructure
+   upkeep. Population maintenance is intentionally excluded: a colony that
+   cannot fully fund it loses happiness, not the empire's stability. */
 function getSectorsInDeficit() {
   if (!state || !state.galaxy) return [];
   return state.galaxy.sectors.filter(function (sector) {
-    return getSectorStock(sector.id, "energy") < 0 ||
-      getSectorStock(sector.id, "minerals") < 0;
+    const econ = getSectorEconomy(sector.id);
+    const due = Math.max(0, econ.infrastructureUpkeep || 0);
+    return due > 0 && getSectorStock(sector.id, "energy") + 1e-9 < due;
   });
 }
 
@@ -270,18 +316,23 @@ function getSectorEconomy(sectorId) {
   let buildingUpkeep = 0;
   let populationUpkeepEnergy = 0;
   let populationUpkeepMinerals = 0;
-  let sustenanceColonies = 0;
-  let housingColonies = 0;
+  let populationEnergySpent = 0;
+  let populationMineralsSpent = 0;
+  let happinessTotal = 0;
+  let growthTotal = 0;
   let population = 0;
-  let populationCap = 0;
+  let housingCapacity = 0;
   let builtCount = 0;
   let idleJobs = 0;
+  let idleBuildings = 0;
+  let blockedBuildings = 0;
+  const allocations = sector ? getSectorColonyAllocations(sector.id) : null;
 
   if (sector) {
     getSectorSystems(sector.id).forEach(function (system) {
       if (!system.colonized) return;
       colonyCount += 1;
-      const planet = getPlanetBreakdown(system);
+      const planet = getPlanetBreakdown(system, allocations ? allocations.byId[system.id] : null);
       planets.push({ system: system, planet: planet });
       counts.mine += planet.counts.mine;
       counts.power += planet.counts.power;
@@ -295,12 +346,16 @@ function getSectorEconomy(sectorId) {
       buildingUpkeep += planet.buildingUpkeep;
       populationUpkeepEnergy += planet.populationUpkeep.energy;
       populationUpkeepMinerals += planet.populationUpkeep.minerals;
-      if (planet.populationUpkeep.energy) sustenanceColonies += 1;
-      if (planet.populationUpkeep.minerals) housingColonies += 1;
+      populationEnergySpent += planet.populationMaintenance.energySpent;
+      populationMineralsSpent += planet.populationMaintenance.mineralsSpent;
+      happinessTotal += planet.populationMaintenance.happiness;
+      growthTotal += planet.populationMaintenance.growthAmount;
       population += planet.population;
-      populationCap += planet.populationCap;
+      housingCapacity += planet.housingCapacity;
       builtCount += planet.builtCount;
       idleJobs += planet.idleJobs;
+      idleBuildings += planet.idleBuildings;
+      blockedBuildings += planet.blockedBuildings;
     });
   }
 
@@ -336,7 +391,10 @@ function getSectorEconomy(sectorId) {
 
   if (colonyUpkeep) addEntry(upkeepItems, "Colony overhead ×" + colonyCount, colonyUpkeep);
   if (populationUpkeepEnergy) {
-    addEntry(upkeepItems, "Population sustenance ×" + sustenanceColonies, populationUpkeepEnergy);
+    addEntry(upkeepItems, "Population energy maintenance ×" + colonyCount, populationUpkeepEnergy,
+      populationEnergySpent < populationUpkeepEnergy
+        ? "Short of " + formatEconomic(populationUpkeepEnergy - populationEnergySpent) + " ⚡"
+        : "");
   }
   BUILDING_ORDER.forEach(function (type) {
     const count = counts[type] || 0;
@@ -346,7 +404,10 @@ function getSectorEconomy(sectorId) {
     }
   });
   if (populationUpkeepMinerals) {
-    addEntry(mineralUpkeepItems, "Population housing ×" + housingColonies, populationUpkeepMinerals);
+    addEntry(mineralUpkeepItems, "Population housing investment ×" + colonyCount, populationUpkeepMinerals,
+      populationMineralsSpent < populationUpkeepMinerals
+        ? "Short of " + formatEconomic(populationUpkeepMinerals - populationMineralsSpent) + " ⛏"
+        : "");
   }
 
   /* Per-colony source rows, so the resource sheet can name the world. */
@@ -375,7 +436,8 @@ function getSectorEconomy(sectorId) {
     research: roundIncome(raw.research * researchMult * stabilityMult),
     influence: roundIncome(raw.influence * stabilityMult)
   };
-  const upkeep = colonyUpkeep + buildingUpkeep + structureUpkeep + researchUpkeep + populationUpkeepEnergy;
+  const infrastructureUpkeep = colonyUpkeep + buildingUpkeep + structureUpkeep + researchUpkeep;
+  const upkeep = infrastructureUpkeep + populationUpkeepEnergy;
   const mineralUpkeep = populationUpkeepMinerals;
   const tradeFlow = sector ? getSectorTradeFlow(sector.id) : {
     in: { energy: 0, minerals: 0 },
@@ -402,6 +464,17 @@ function getSectorEconomy(sectorId) {
   const strongholdUpkeep = strongholdCount * ((STRUCTURE_TYPES.stronghold && STRUCTURE_TYPES.stronghold.energyUpkeep) || 0);
   const tradeCenterCount = structureCounts.trading || 0;
   const tradeCenterUpkeep = tradeCenterCount * ((STRUCTURE_TYPES.trading && STRUCTURE_TYPES.trading.energyUpkeep) || 0);
+  const populationMaintenance = {
+    colonies: colonyCount,
+    energyRequested: populationUpkeepEnergy,
+    energySpent: populationEnergySpent,
+    mineralsRequested: populationUpkeepMinerals,
+    mineralsSpent: populationMineralsSpent,
+    happiness: colonyCount ? happinessTotal / colonyCount : 0,
+    growth: growthTotal,
+    shortfallEnergy: Math.max(0, populationUpkeepEnergy - populationEnergySpent),
+    shortfallMinerals: Math.max(0, populationUpkeepMinerals - populationMineralsSpent)
+  };
 
   return {
     sector: sector,
@@ -410,8 +483,10 @@ function getSectorEconomy(sectorId) {
     counts: counts,
     builtCount: builtCount,
     population: population,
-    populationCap: populationCap,
+    housingCapacity: housingCapacity,
     idleJobs: idleJobs,
+    idleBuildings: idleBuildings,
+    blockedBuildings: blockedBuildings,
     planets: planets,
     raw: raw,
     income: income,
@@ -419,8 +494,10 @@ function getSectorEconomy(sectorId) {
     upkeepItems: upkeepItems,
     colonyUpkeep: colonyUpkeep,
     buildingUpkeep: buildingUpkeep,
+    infrastructureUpkeep: infrastructureUpkeep,
     populationUpkeepEnergy: populationUpkeepEnergy,
     populationUpkeepMinerals: populationUpkeepMinerals,
+    populationMaintenance: populationMaintenance,
     structureUpkeep: structureUpkeep,
     strongholdCount: strongholdCount,
     strongholdUpkeep: strongholdUpkeep,
@@ -462,18 +539,25 @@ function getEconomy() {
   let colonyCount = 0;
   let colonyUpkeep = 0;
   let buildingUpkeep = 0;
+  let infrastructureUpkeep = 0;
   let structureUpkeep = 0;
   let researchUpkeep = 0;
   let populationUpkeepEnergy = 0;
   let mineralUpkeep = 0;
+  let populationEnergySpent = 0;
+  let populationMineralsSpent = 0;
+  let happinessTotal = 0;
+  let growthTotal = 0;
   let strongholdCount = 0;
   let strongholdUpkeep = 0;
   let tradeCenterCount = 0;
   let tradeCenterUpkeep = 0;
   let population = 0;
-  let populationCap = 0;
+  let housingCapacity = 0;
   let builtCount = 0;
   let idleJobs = 0;
+  let idleBuildings = 0;
+  let blockedBuildings = 0;
   let netEnergy = 0;
   let netMinerals = 0;
 
@@ -502,8 +586,13 @@ function getEconomy() {
     });
     colonyUpkeep += sectorEcon.colonyUpkeep;
     buildingUpkeep += sectorEcon.buildingUpkeep;
+    infrastructureUpkeep += sectorEcon.infrastructureUpkeep;
     populationUpkeepEnergy += sectorEcon.populationUpkeepEnergy;
     mineralUpkeep += sectorEcon.mineralUpkeep;
+    populationEnergySpent += sectorEcon.populationMaintenance.energySpent;
+    populationMineralsSpent += sectorEcon.populationMaintenance.mineralsSpent;
+    happinessTotal += sectorEcon.populationMaintenance.happiness * sectorEcon.colonyCount;
+    growthTotal += sectorEcon.populationMaintenance.growth;
     structureUpkeep += sectorEcon.structureUpkeep;
     researchUpkeep += sectorEcon.researchUpkeep;
     strongholdCount += sectorEcon.strongholdCount;
@@ -511,9 +600,11 @@ function getEconomy() {
     tradeCenterCount += sectorEcon.tradeCenterCount;
     tradeCenterUpkeep += sectorEcon.tradeCenterUpkeep;
     population += sectorEcon.population;
-    populationCap += sectorEcon.populationCap;
+    housingCapacity += sectorEcon.housingCapacity;
     builtCount += sectorEcon.builtCount;
     idleJobs += sectorEcon.idleJobs;
+    idleBuildings += sectorEcon.idleBuildings;
+    blockedBuildings += sectorEcon.blockedBuildings;
     netEnergy += sectorEcon.net.energy;
     netMinerals += sectorEcon.net.minerals;
   });
@@ -543,7 +634,7 @@ function getEconomy() {
     (hasTech("diplomacyNetwork") ? TECHS.diplomacyNetwork.influenceBonus : 0);
   income.influence = roundIncome(rawInfluence * stabilityMult);
 
-  const upkeep = colonyUpkeep + buildingUpkeep + structureUpkeep + researchUpkeep + populationUpkeepEnergy;
+  const upkeep = infrastructureUpkeep + populationUpkeepEnergy;
   income.energy = roundIncome(income.energy);
   income.minerals = roundIncome(income.minerals);
   income.research = roundIncome(income.research);
@@ -556,6 +647,7 @@ function getEconomy() {
   const mineralMult = ethic && ethic.mineralMult ? ethic.mineralMult : 1;
   if (mineralMult !== 1) mineralMods.push({ label: "Militarist doctrine", mult: mineralMult });
   if (stabilityMult !== 1) mineralMods.push({ label: "Unrest", mult: stabilityMult });
+
   const researchMods = [];
   const researchMult = ethic && ethic.researchMult ? ethic.researchMult : 1;
   if (researchMult !== 1) researchMods.push({ label: "Xenophile doctrine", mult: researchMult });
@@ -566,6 +658,17 @@ function getEconomy() {
     energyMods.push({ label: "Unrest", mult: stabilityMult });
     influenceMods.push({ label: "Unrest", mult: stabilityMult });
   }
+  const populationMaintenance = {
+    colonies: colonyCount,
+    energyRequested: populationUpkeepEnergy,
+    energySpent: populationEnergySpent,
+    mineralsRequested: mineralUpkeep,
+    mineralsSpent: populationMineralsSpent,
+    happiness: colonyCount ? happinessTotal / colonyCount : 0,
+    growth: growthTotal,
+    shortfallEnergy: Math.max(0, populationUpkeepEnergy - populationEnergySpent),
+    shortfallMinerals: Math.max(0, mineralUpkeep - populationMineralsSpent)
+  };
 
   return {
     sectors: sectors,
@@ -574,8 +677,10 @@ function getEconomy() {
     counts: counts,
     builtCount: builtCount,
     population: population,
-    populationCap: populationCap,
+    housingCapacity: housingCapacity,
     idleJobs: idleJobs,
+    idleBuildings: idleBuildings,
+    blockedBuildings: blockedBuildings,
     stabilityMult: stabilityMult,
     instability: stabilityMult !== 1,
     strongholdCount: strongholdCount,
@@ -586,9 +691,11 @@ function getEconomy() {
     researchUpkeep: researchUpkeep,
     colonyUpkeep: colonyUpkeep,
     buildingUpkeep: buildingUpkeep,
+    infrastructureUpkeep: infrastructureUpkeep,
     populationUpkeepEnergy: populationUpkeepEnergy,
     mineralUpkeep: mineralUpkeep,
     mineralUpkeepItems: mineralUpkeepItems,
+    populationMaintenance: populationMaintenance,
     raw: raw,
     income: income,
     netEnergy: netEnergy,
@@ -635,7 +742,7 @@ function applyResourceIncome(key, amount) {
   const total = amount + carry;
   const gain = Math.floor(total + 1e-9);
   state.resourceCarry[key] = Math.max(0, total - gain);
-  state.resources[key] = (state.resources[key] || 0) + gain;
+  state.resources[key] = Math.max(0, (state.resources[key] || 0) + gain);
   return gain;
 }
 

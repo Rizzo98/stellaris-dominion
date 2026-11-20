@@ -55,8 +55,8 @@ const TECH_CATEGORIES = [
 const TECH_CATEGORY_ORDER = ["building", "military", "trade"];
 
 const TECH_GROUPS = {
-  mine: { id: "mine", category: "building", name: "Mine", emoji: "⛏️", hint: "Refit a standing Mine with the upgrade button on its colony slot." },
-  power: { id: "power", category: "building", name: "Power Plant", emoji: "🏭", hint: "Refit a standing Power Plant on its colony slot." },
+  mine: { id: "mine", category: "building", name: "Mine", emoji: "⛏️", hint: "Refit a standing Mine on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker." },
+  power: { id: "power", category: "building", name: "Power Plant", emoji: "🏭", hint: "Refit a standing Power Plant on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker." },
   lab: { id: "lab", category: "building", name: "Lab", emoji: "🔬", hint: "Refit a standing Lab on its colony slot." },
   embassy: { id: "embassy", category: "building", name: "Embassy", emoji: "🏛️", hint: "Refit a standing Embassy on its colony slot." },
 
@@ -131,14 +131,21 @@ const BUILDING_TECH_LINES = [
 
 BUILDING_TECH_LINES.forEach(function (line) {
   const def = BUILDINGS[line.building];
-  const base = def.output[line.resource] || 0;
-  const step = def.perLevel[line.resource] || 0;
+  const facilityLevels = def.facility ? CONFIG.economy.facilities.levels : null;
+  const base = def.output ? (def.output[line.resource] || 0) : 0;
+  const step = def.perLevel ? (def.perLevel[line.resource] || 0) : 0;
   const maxLevel = def.maxLevel || 4;
   line.names.forEach(function (name, index) {
     const level = index + 2;
     if (level > maxLevel) return;
-    const value = base + step * (level - 1);
-    const previous = value - step;
+    const levelDef = facilityLevels ? facilityLevels[level - 1] : null;
+    const previousDef = facilityLevels ? facilityLevels[level - 2] : null;
+    const value = levelDef ? levelDef.output : base + step * (level - 1);
+    const previous = levelDef ? (previousDef ? previousDef.output : 0) : value - step;
+    const levelName = levelDef ? " (" + levelDef.name + ")" : "";
+    const crew = levelDef
+      ? " · " + levelDef.workers + " workers · needs " + levelDef.minPopulation + " population"
+      : "";
     registerTech({
       id: line.building + "Tech" + (level - 1),
       name: name,
@@ -150,8 +157,8 @@ BUILDING_TECH_LINES.forEach(function (line) {
       requiresTech: level > 2 ? [line.building + "Tech" + (level - 2)] : [],
       building: line.building,
       buildingLevel: level,
-      effect: "Unlocks " + def.name + " level " + level + ": " + value + " " + line.icon +
-        " per building instead of " + previous + " " + line.icon + ".",
+      effect: "Unlocks " + def.name + " level " + level + levelName + ": " + value + " " + line.icon +
+        " per building instead of " + previous + " " + line.icon + crew + ".",
       detail: line.detail
     });
   });

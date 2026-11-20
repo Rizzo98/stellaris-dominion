@@ -19,12 +19,19 @@ function colonizeSystem(systemId) {
     return;
   }
   state.resources.influence -= CONFIG.colonizeCost.influence;
+  const economy = getEconomyConfig();
   system.colonized = true;
   system.foundedTurn = state.turn;
-  system.population = CONFIG.population.colonyStart;
+  system.population = economy.startingPopulation.colony;
   system.slots = createPlanetSlots(system);
   system.unlockedBonusSlots = 0;
-  system.populationUpkeep = { housing: 0, sustenance: 0 };
+  system.maintenance = {
+    energy: economy.defaultEnergyPercent,
+    minerals: economy.defaultMineralsPercent
+  };
+  system.workerStrategy = economy.defaultWorkerStrategy;
+  system.workerOrders = {};
+  system.economyReport = null;
   system.growthProgress = 0;
   system.completedNow = false;
   markHexExplored(system.row, system.col, system.sectorId);
@@ -60,10 +67,14 @@ function buildInSlot(systemId, slotIndex, type) {
   system.completedNow = false;
   closeSheet();
   renderAll();
-  const workers = getBuildingWorkers(type);
-  toast(def.name + " under construction" + (builtLevel > 1 ? " at LVL " + builtLevel : "") +
+  const workers = getBuildingWorkers(type, builtLevel);
+  const minPopulation = getBuildingMinPopulation(type, builtLevel);
+  const levelName = getBuildingLevelName(type, builtLevel);
+  toast(def.name + " under construction" +
+    (builtLevel > 1 ? " at LVL " + builtLevel + (levelName ? " (" + levelName + ")" : "") : "") +
     ". Online next turn" +
-    (workers ? " — it needs " + workers + (workers === 1 ? " worker." : " workers.") : "."));
+    (workers ? " — it needs " + workers + (workers === 1 ? " worker" : " workers") : "") +
+    (minPopulation ? " and a colony of at least " + minPopulation + "." : "."));
 }
 
 /* Bonus slots are opened in order. The planet was generated with a fixed
@@ -200,26 +211,77 @@ function repairShip(shipId) {
   return true;
 }
 
-/* The population menu's two steppers. Housing is bought with minerals,
-   sustenance with energy, and both are standing upkeep bills paid by the
-   colony's sector every turn. A housing cut is refused while it would leave
-   more people than houses: housing is the hard cap. */
+/* The population menu's two steppers. Energy funds the population's power
+   draw, minerals fund its housing. Both are percentages of the full
+   requirement, charged to the colony's sector every turn. "housing" and
+   "sustenance" remain accepted as aliases so older callers and saves keep
+   working. */
+function normalizeMaintenanceAxis(axis) {
+  if (axis === "housing") return "minerals";
+  if (axis === "sustenance") return "energy";
+  return axis;
+}
+
 function adjustPopulationUpkeep(systemId, axis, delta) {
   if (state.phase !== "actions") return false;
   const system = getSystem(systemId);
   if (!system || !system.colonized) return false;
-  const reason = getPopulationUpkeepChangeReason(system, axis, delta);
-  if (reason) {
-    toast(reason);
+  const normalized = normalizeMaintenanceAxis(axis);
+  const result = adjustColonyMaintenance(system, normalized, delta);
+  if (!result.ok) {
+    toast(result.reason);
     if (typeof refreshPopulationSheet === "function") refreshPopulationSheet();
     return false;
   }
-  const policy = getPopulationPolicy(system);
-  const step = axis === "housing" ? getPopulationHousingUpkeepStep() : 1;
-  const max = axis === "housing" ? getMaxHousingUpkeep(system) : getMaxSustenanceUpkeep(system);
-  policy[axis] = clamp(policy[axis] + (delta < 0 ? -step : step), 0, max);
   renderAll();
   if (typeof refreshPopulationSheet === "function") refreshPopulationSheet();
+  return true;
+}
+
+/* Explicit crew orders. Pressing + or − on a facility pins every completed
+   building's current crew and then moves one worker, so the player's
+   allocation is deterministic and the rest of the colony does not silently
+   reshuffle. */
+function adjustFacilityWorkers(systemId, slotIndex, delta) {
+  if (state.phase !== "actions") return false;
+  const system = getSystem(systemId);
+  if (!system || !system.colonized) return false;
+  const result = adjustFacilityWorkersOrder(system, slotIndex, delta);
+  if (!result.ok) {
+    toast(result.reason);
+    renderAll();
+    return false;
+  }
+  renderAll();
+  toast("Crew reassigned on " + system.name + ": " + result.workers + " workers.");
+  return true;
+}
+
+function setWorkerStrategy(systemId, strategyId) {
+  if (state.phase !== "actions") return false;
+  const system = getSystem(systemId);
+  if (!system || !system.colonized) return false;
+  const cfg = getEconomyConfig();
+  const strategy = (cfg.workerStrategies || []).find(function (entry) { return entry.id === strategyId; });
+  if (!strategy) return false;
+  if (system.workerStrategy === strategyId) return true;
+  system.workerStrategy = strategyId;
+  renderAll();
+  if (typeof refreshPopulationSheet === "function") refreshPopulationSheet();
+  toast(hasWorkerOrders(system)
+    ? strategy.label + " selected. Reset crews to auto to apply it."
+    : "Automatic crews: " + strategy.label + ".");
+  return true;
+}
+
+function resetFacilityWorkers(systemId) {
+  if (state.phase !== "actions") return false;
+  const system = getSystem(systemId);
+  if (!system || !system.colonized) return false;
+  clearWorkerOrders(system);
+  renderAll();
+  if (typeof refreshPopulationSheet === "function") refreshPopulationSheet();
+  toast("Workforce back on automatic " + getWorkerStrategyLabel(getWorkerStrategy(system)).toLowerCase() + ".");
   return true;
 }
 

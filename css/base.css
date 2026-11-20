@@ -84,5 +84,6 @@ h1,h2,h3,p{margin:0}
 .text-good{color:var(--green) !important}
 .text-bad{color:var(--red) !important}
 .text-gold{color:var(--gold) !important}
+.text-faint{color:var(--faint) !important}
 .text-cyan{color:var(--cyan) !important}
 .text-muted{color:var(--muted) !important}

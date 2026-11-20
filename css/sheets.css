@@ -120,6 +120,30 @@
   transition:width .25s ease;
 }
 .sustenance-fill.tier-thriving{background:linear-gradient(90deg,var(--gold),var(--cyan))}
+/* Colony economy meters and the happiness tier label. */
+.colony-tier{
+  margin-left:5px;padding:1px 5px;border-radius:4px;
+  font-size:5.8px;letter-spacing:.06em;
+  border:1px solid var(--line);color:var(--faint);background:rgba(9,17,28,.6);
+}
+.colony-tier.tier-flourishing{color:var(--cyan);border-color:rgba(103,232,213,.35);background:rgba(16,47,46,.34)}
+.colony-tier.tier-content{color:var(--green);border-color:rgba(142,230,163,.3);background:rgba(17,40,32,.36)}
+.colony-tier.tier-strained{color:var(--gold);border-color:rgba(244,201,107,.28);background:rgba(48,40,22,.32)}
+.colony-tier.tier-unhappy{color:#ffb9b9;border-color:rgba(255,122,122,.3);background:rgba(46,21,27,.34)}
+.colony-tier.tier-miserable{color:var(--red);border-color:rgba(255,122,122,.4);background:rgba(58,20,24,.4)}
+.colony-meter{height:6px;border-radius:99px;overflow:hidden;background:#18283a;margin:1px 0 2px}
+.colony-fill{
+  display:block;height:100%;border-radius:inherit;
+  background:linear-gradient(90deg,var(--red),var(--gold),var(--green));
+  transition:width .25s ease;
+}
+.colony-fill.energy{background:linear-gradient(90deg,var(--gold),var(--cyan))}
+.colony-fill.housing{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+.colony-fill.tier-flourishing{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.colony-fill.tier-content{background:linear-gradient(90deg,var(--gold),var(--green))}
+.colony-fill.tier-strained{background:linear-gradient(90deg,var(--gold),#d9a94a)}
+.colony-fill.tier-unhappy{background:linear-gradient(90deg,var(--red),var(--gold))}
+.colony-fill.tier-miserable{background:linear-gradient(90deg,#8f1f2b,var(--red))}
 .upkeep-row{
   display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;
   border:1px solid var(--line);border-radius:9px;padding:6px 8px;
@@ -473,4 +497,35 @@
   .battle-volley-hull{grid-column:1 / -1;text-align:left;padding-left:2px}
   .battle-fleet-composition{white-space:normal}
   .battle-unit-stat{font-size:5.5px}
+}
+
+/* ---------- automatic crew strategy ---------- */
+.worker-strategy{
+  border:1px solid rgba(78,105,135,.32);
+  border-radius:10px;
+  padding:9px;
+  margin:1px 0 6px;
+  background:linear-gradient(180deg,rgba(18,31,47,.86),rgba(11,20,33,.86));
+}
+.worker-strategy-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.worker-strategy-title{
+  font-family:var(--mono);font-size:7px;font-weight:750;letter-spacing:.08em;color:var(--faint);
+}
+.worker-strategy-value{
+  font-family:var(--mono);font-size:7px;font-weight:750;letter-spacing:.05em;color:var(--cyan);
+}
+.worker-strategy-options{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px}
+.strategy-btn{
+  min-height:31px;border-radius:8px;border:1px solid var(--line);
+  background:rgba(9,17,28,.62);
+  font-family:var(--mono);font-size:7.4px;font-weight:750;letter-spacing:.05em;color:var(--muted);
+}
+.strategy-btn.active{
+  color:#041411;border-color:transparent;
+  background:linear-gradient(180deg,var(--cyan),#3ecfba);
+  box-shadow:0 0 12px rgba(103,232,213,.2);
+}
+.strategy-btn:active{transform:scale(.985)}
+.strategy-note{
+  margin-top:6px;font-family:var(--mono);font-size:6.8px;line-height:1.5;color:var(--faint);
 }

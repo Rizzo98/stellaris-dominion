@@ -10,9 +10,10 @@
 const EFFECT_KEY_ORDER = ["energy", "minerals", "research", "influence", "stability"];
 
 /* Applies { energy, minerals, research, influence, stability } in place.
-   Minerals are floored at 0; energy may go negative and is handled by the
-   turn pipeline. Positive research is auto-invested in the active project.
-   Returns the applied list for logs/tests. */
+   Sector ledgers are floored at 0 by setSectorStock(), so a negative event
+   effect can empty a stock but never overdraw it. Positive research is
+   auto-invested in the active project. Returns the applied list for
+   logs/tests. */
 function applyEffects(effects, sectorId) {
   const applied = [];
   let gainedResearch = false;
@@ -30,7 +31,7 @@ function applyEffects(effects, sectorId) {
     if (key === "energy" || key === "minerals") {
       if (!targetSectorId) return;
       const next = getSectorStock(targetSectorId, key) + value;
-      setSectorStock(targetSectorId, key, key === "energy" ? next : Math.max(0, next));
+      setSectorStock(targetSectorId, key, next);
       applied.push({ key: key, value: value });
       return;
     }

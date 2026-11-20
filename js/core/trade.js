@@ -337,8 +337,8 @@ function getTradeSummary() {
   };
 }
 
-/* Routes ship after production. A sector never sends more than it holds;
-   energy stock may be negative after upkeep, which simply ships nothing.
+/* Routes ship after production. A sector never sends more than it holds,
+   and ledgers are clamped at zero, so an empty sector simply ships nothing.
    Routes of the same center run in slot order, so the second route sees
    whatever the first one left behind. */
 function resolveTradeTransfers() {

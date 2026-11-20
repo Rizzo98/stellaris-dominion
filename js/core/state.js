@@ -63,16 +63,36 @@ function createInitialState(ethicId) {
 
   const generated = createGalaxy(CONFIG.galaxy.seed);
   const galaxy = generated.galaxy;
+  const economy = getEconomyConfig();
   const systems = generated.systems.map(function (system) {
+    const slots = createPlanetSlots(system);
+    /* The capital opens with its starter facilities already built. They are
+       ordinary level-1 buildings: the same worker and minimum-population
+       rules apply, and the player can refit or replace them later. */
+    if (system.home) {
+      economy.startingFacilities.forEach(function (facility, index) {
+        const def = BUILDINGS[facility.type];
+        if (!def || slots[index] === undefined) return;
+        const level = Math.min(Math.max(1, Math.floor(facility.level || 1)), def.maxLevel || 1);
+        slots[index] = { type: facility.type, level: level, underConstruction: false };
+      });
+    }
     return Object.assign({}, system, {
       colonized: !!system.home,
       foundedTurn: system.home ? 1 : null,
-      population: system.home ? CONFIG.population.homeStart : 0,
-      slots: createPlanetSlots(system),
+      population: system.home ? economy.startingPopulation.home : 0,
+      slots: slots,
       unlockedBonusSlots: 0,
-      /* Standing population upkeep: minerals buy houses, energy buys
-         sustenance. Both are set from the colony's population menu. */
-      populationUpkeep: { housing: 0, sustenance: 0 },
+      /* Maintenance is requested as a percentage of the full requirement
+         (P^1.1 energy and P^(1/0.9) housing minerals). Explicit worker orders
+         are empty by default, so the colony follows its automatic strategy. */
+      maintenance: {
+        energy: economy.defaultEnergyPercent,
+        minerals: economy.defaultMineralsPercent
+      },
+      workerStrategy: economy.defaultWorkerStrategy,
+      workerOrders: {},
+      economyReport: null,
       growthProgress: 0,
       completedNow: false
     });

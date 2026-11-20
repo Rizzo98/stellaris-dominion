@@ -36,6 +36,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",

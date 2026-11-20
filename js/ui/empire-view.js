@@ -190,6 +190,8 @@ function renderEmpireView() {
     let pill;
     if (hasConstruction) {
       pill = '<span class="pill alert">BUILDING</span>';
+    } else if (planet.workforce.blockedBuildings > 0) {
+      pill = '<span class="pill alert">NEEDS POP</span>';
     } else if (planet.workforce.idleBuildings > 0) {
       pill = '<span class="pill alert">NO WORKERS</span>';
     } else if (planet.workforce.partialBuildings > 0) {
@@ -206,7 +208,8 @@ function renderEmpireView() {
         '<span class="p-main">' +
           '<span class="p-name">' + system.name + (system.home ? " · CAPITAL" : "") + "</span>" +
           '<span class="p-yield">⚡ ' + formatSigned(localEnergy) + " · ⛏ " + formatSigned(planet.output.minerals) +
-          " · 🔬 " + formatSigned(planet.output.research) + " · 👥 " + planet.population + "/" + planet.populationCap + "</span>" +
+          " · 🔬 " + formatSigned(planet.output.research) + " · 👥 " + planet.population +
+          " · 😊 " + Math.round(planet.happiness) + "%</span>" +
         "</span>" +
         '<span class="p-side">' + pill + "</span>" +
       "</button>"

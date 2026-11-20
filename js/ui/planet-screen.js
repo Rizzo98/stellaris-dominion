@@ -6,13 +6,16 @@
    ============================================================ */
 
 function buildingYieldText(type, level) {
-  const output = getBuildingOutput(type, level);
+  const lv = level == null ? 1 : level;
+  const output = getBuildingOutput(type, lv);
   const parts = [];
   ["energy", "minerals", "research", "influence"].forEach(function (key) {
     if (output[key]) parts.push("+" + formatAmount(output[key]) + " " + RESOURCE_META[key].icon);
   });
-  const workers = getBuildingWorkers(type);
+  const workers = getBuildingWorkers(type, lv);
   if (workers) parts.push(workers + (workers === 1 ? " worker" : " workers"));
+  const minPopulation = getBuildingMinPopulation(type, lv);
+  if (minPopulation) parts.push("needs " + minPopulation + " pop");
   const upkeep = getBuildingUpkeep(type);
   if (upkeep) parts.push("−" + upkeep + " " + RESOURCE_META.energy.icon + " upkeep");
   return parts.join(" · ");
@@ -31,8 +34,30 @@ function buildingScaledYieldText(type, ratio, level) {
   return parts.length ? parts.join(" · ") : "No output";
 }
 
-function buildingLevelChip(level) {
-  return level > 1 ? ' <span class="slot-level">LVL ' + level + "</span>" : "";
+function buildingLevelChip(level, type) {
+  if (!level || level <= 1) return "";
+  const levelName = getBuildingLevelName(type, level);
+  return ' <span class="slot-level">LVL ' + level + (levelName ? " · " + levelName.toUpperCase() : "") + "</span>";
+}
+
+/* Crew controls on a completed facility. The buttons are disabled with a
+   title when the move is illegal (full crew, no free workers, population
+   below the facility's minimum). */
+function facilityCrewHTML(system, index, entry) {
+  if (!entry || entry.underConstruction) return "";
+  const minusReason = getFacilityWorkerChangeReason(system, index, -1);
+  const plusReason = getFacilityWorkerChangeReason(system, index, 1);
+  return (
+    '<span class="slot-crew" role="group" aria-label="Assign workers to slot ' + (index + 1) + '">' +
+      '<button class="slot-crew-btn" type="button" data-facility-workers="' + index + ':-1"' +
+        (minusReason ? ' disabled title="' + minusReason + '"' : "") +
+        ' aria-label="Remove one worker from slot ' + (index + 1) + '">−</button>' +
+      '<b class="slot-crew-value">' + entry.workersAssigned + "/" + entry.workersRequired + "</b>" +
+      '<button class="slot-crew-btn" type="button" data-facility-workers="' + index + ':1"' +
+        (plusReason ? ' disabled title="' + plusReason + '"' : "") +
+        ' aria-label="Assign one worker to slot ' + (index + 1) + '">+</button>' +
+    "</span>"
+  );
 }
 
 /* A tech never upgrades a standing building by itself. When a completed
@@ -192,55 +217,67 @@ function planetYieldChips(system, planet) {
   const totalSlots = getTotalSlots(system);
   const unlockedSlots = getMaxSlots(system);
   const lockedSlots = totalSlots - unlockedSlots;
+  const happiness = Math.round(planet.happiness);
   return (
     '<span class="yield-chip">' + size.name.toUpperCase() + " · " + size.slots + " SLOTS</span>" +
     '<span class="yield-chip ' + (localEnergy >= 0 ? "good" : "bad") + '">⚡ ' + formatSigned(localEnergy) + "</span>" +
     '<span class="yield-chip">⛏ ' + formatSigned(planet.output.minerals) + "</span>" +
     '<span class="yield-chip">🔬 ' + formatSigned(planet.output.research) + "</span>" +
-    '<span class="yield-chip' + (planet.idleJobs > 0 ? " warn" : "") + '">👥 ' + planet.population + "/" + planet.populationCap + "</span>" +
+    '<span class="yield-chip' + (planet.idleJobs > 0 ? " warn" : "") + '">👥 ' + planet.population + "</span>" +
+    '<span class="yield-chip ' + (happiness >= 70 ? "good" : happiness >= 40 ? "warn" : "bad") + '">😊 ' + happiness + "%</span>" +
     '<span class="yield-chip">▦ ' + getUsedSlots(system) + "/" + unlockedSlots +
       " USED" + (lockedSlots ? " · " + lockedSlots + " LOCKED" : "") + "</span>"
   );
 }
 
-/* The population card is the door to the population menu. It carries the
-   live readout of both new stats: houses (the hard cap) and sustenance (the
-   growth multiplier). */
+/* The population card is the door to the maintenance menu. It reports the
+   one relationship the system is built around: people need energy and
+   housing, and the happiness they produce is the growth rate. */
 function populationCardHTML(system, planet) {
   const wf = planet.workforce;
-  const sust = wf.sustenance;
-  const percent = wf.cap > 0 ? clamp((wf.population / wf.cap) * 100, 0, 100) : 0;
+  const report = planet.populationMaintenance;
+  const happiness = Math.round(report.happiness);
+  const energyPercent = Math.round(report.energyFulfillment * 100);
+  const housingPercent = report.population > 0
+    ? clamp((report.housingCapacity / report.population) * 100, 0, 100)
+    : 100;
   const idleClass = wf.idleJobs > 0 ? " warn" : "";
-  const growthClass = wf.canGrow ? " good" : " warn";
-  const sustainClass = sust.percent >= 100 && wf.sustenanceUpkeep > 0 ? " good" : " warn";
+  const happyClass = happiness >= 70 ? " good" : happiness >= 40 ? " warn" : " bad";
+  const growthClass = report.canGrow ? " good" : " warn";
+  const tier = report.tier || { id: "miserable", label: "MISERABLE" };
   let growthText = "PAUSED";
   let note;
 
-  if (wf.overcrowded) {
-    growthText = "OVERCROWDED";
-    note = "Housing is below the population. The extra people will leave when the turn ends.";
-  } else if (wf.growthBlockedBy === "housing") {
-    const atHousingMax = wf.housingUpkeep >= getMaxHousingUpkeep(system);
-    growthText = atHousingMax ? "SIZE LIMIT" : "HOUSING FULL";
-    if (atHousingMax) {
-      note = "Every house this planet can hold is built, so the population cannot grow further.";
-    } else if (wf.sustenanceUpkeep <= 0) {
-      note = "Every house is taken and no sustenance is funded. Open the population menu and set both upkeeps to grow.";
-    } else {
-      note = "Every house is taken. Open the population menu and raise the mineral upkeep to build more.";
-    }
-  } else if (wf.growthBlockedBy === "sustenance") {
-    growthText = "NO SUSTENANCE";
-    note = "No sustenance is funded, so the colony cannot grow. Open the population menu and set an energy upkeep for food and entertainment.";
+  if (report.population <= 0) {
+    growthText = "EMPTY";
+    note = "No population lives here. Maintained colonies start with " +
+      getEconomyConfig().startingPopulation.colony + " people.";
+  } else if (report.canGrow) {
+    growthText = "+" + formatGrowthAmount(report.growthAmount) + " / TURN";
+    note = "Next population in " + report.turnsToNextPop +
+      (report.turnsToNextPop === 1 ? " turn." : " turns.") +
+      " Happiness " + happiness + "% · energy " + energyPercent + "% · housing " + housingPercent + "%.";
+  } else if (report.growthBlockedBy === "unfunded") {
+    growthText = "UNFUNDED";
+    note = "The colony has no energy and is short on housing. Open the population menu and fund both maintenance lines.";
+  } else if (report.growthBlockedBy === "energy") {
+    growthText = "NO ENERGY";
+    note = "The colony cannot supply the energy its people need. Open the population menu and fund the energy maintenance.";
+  } else if (report.growthBlockedBy === "housing") {
+    growthText = "NO HOUSING";
+    note = "Minerals invested in housing are below what the population needs. Open the population menu and raise the housing investment.";
   } else {
-    growthText = "+" + formatAmount(wf.growthPerTurn) + " / TURN";
-    note = "Next population in " + wf.turnsToNextPop + (wf.turnsToNextPop === 1 ? " turn." : " turns.") +
-      " Sustenance at " + sust.percent + "% sets a ×" + (sust.mult.toFixed(2)) + " growth rate; houses are the hard cap.";
+    growthText = "NO GROWTH";
+    note = "Happiness is zero, so the population is stable. Fund energy and housing to restart growth.";
   }
 
-  if (wf.idleBuildings > 0) {
+  if (wf.blockedBuildings > 0) {
+    note += " " + wf.blockedBuildings +
+      (wf.blockedBuildings === 1 ? " facility is" : " facilities are") +
+      " below its minimum population.";
+  } else if (wf.idleBuildings > 0) {
     note += " " + wf.idleBuildings + (wf.idleBuildings === 1 ? " building has" : " buildings have") +
-      " no workers: no output, but upkeep is still paid.";
+      " no workers: no output until crewed.";
   } else if (wf.partialBuildings > 0) {
     note += " " + wf.partialBuildings + (wf.partialBuildings === 1 ? " building is" : " buildings are") +
       " understaffed, so output is reduced.";
@@ -249,23 +286,27 @@ function populationCardHTML(system, planet) {
   return (
     '<button class="population-card" type="button" data-population-menu="' + system.id + '"' +
       ' aria-haspopup="dialog" aria-controls="sheet"' +
-      ' aria-label="Manage population on ' + system.name + ': ' + wf.population + ' of ' + wf.cap +
-      ' houses, sustenance ' + sust.percent + ' percent">' +
+      ' aria-label="Manage population on ' + system.name + ': ' + report.population +
+      ' people, happiness ' + happiness + ' percent, energy ' + energyPercent +
+      ' percent, housing ' + housingPercent + ' percent">' +
       '<span class="population-head">' +
         '<span class="population-title"><span class="pop-glyph" aria-hidden="true">👥</span>POPULATION</span>' +
-        '<span class="population-value">' + wf.population + ' <small>/ ' + wf.cap + '</small></span>' +
+        '<span class="population-value">' + report.population + ' <small>PEOPLE</small></span>' +
       '</span>' +
-      '<span class="population-track"><span class="population-fill" style="width:' + percent.toFixed(1) + '%"></span></span>' +
+      '<span class="population-track"><span class="population-fill" style="width:' + happiness.toFixed(1) + '%"></span></span>' +
       '<span class="population-meta">' +
         '<span class="population-chip' + idleClass + '">👷 ' + wf.jobsStaffed + ' / ' + wf.jobsTotal + ' JOBS</span>' +
-        '<span class="population-chip">🏠 ' + wf.cap + ' HOUSING</span>' +
-        '<span class="population-chip' + sustainClass + '">🍲 ' + sust.percent + '% SUSTENANCE</span>' +
+        '<span class="population-chip">⚡ ' + energyPercent + '% ENERGY</span>' +
+        '<span class="population-chip' + (report.housingDeficit > 0 ? " warn" : "") + '">🏠 ' +
+          formatAmount(Math.min(report.housingCapacity, report.population)) + ' / ' + report.population + ' HOUSED</span>' +
+        '<span class="population-chip' + happyClass + '">😊 ' + happiness + '% ' + tier.label + '</span>' +
         '<span class="population-chip' + growthClass + '">📈 ' + growthText + '</span>' +
+        (wf.blockedBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.blockedBuildings + ' BLOCKED</span>' : "") +
         (wf.idleBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.idleBuildings + ' IDLE</span>' : "") +
         (wf.partialBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.partialBuildings + ' PARTIAL</span>' : "") +
       '</span>' +
       '<span class="population-note">' + note + '</span>' +
-      '<span class="population-open"><span>MANAGE HOUSING &amp; SUSTENANCE</span><b aria-hidden="true">›</b></span>' +
+      '<span class="population-open"><span>MANAGE MAINTENANCE &amp; WORKFORCE</span><b aria-hidden="true">›</b></span>' +
     '</button>'
   );
 }
@@ -307,13 +348,19 @@ function slotTileHTML(system, index, workforce) {
 
   const def = BUILDINGS[building.type];
   const planEntry = workforce.entries.find(function (entry) { return entry.index === index; }) || {};
-  const required = planEntry.workersRequired != null ? planEntry.workersRequired : getBuildingWorkers(building.type);
+  const level = getBuildingLevel(building);
+  const levelName = getBuildingLevelName(building.type, level);
+  const levelChip = buildingLevelChip(level, building.type);
+  const required = planEntry.workersRequired != null
+    ? planEntry.workersRequired
+    : getBuildingWorkers(building.type, level);
+  const minPopulation = planEntry.minPopulation != null
+    ? planEntry.minPopulation
+    : getBuildingMinPopulation(building.type, level);
   const assigned = planEntry.workersAssigned || 0;
   const ratio = planEntry.staffedRatio || 0;
   const percent = Math.round(ratio * 100);
-
-  const level = getBuildingLevel(building);
-  const levelChip = buildingLevelChip(level);
+  const eligible = planEntry.eligible !== false;
 
   if (building.underConstruction) {
     return (
@@ -322,7 +369,8 @@ function slotTileHTML(system, index, workforce) {
         '<span class="slot-main">' +
           '<span class="slot-name">' + def.name + levelChip + "</span>" +
           '<span class="slot-yield">Online next turn · needs ' + required +
-            (required === 1 ? " worker" : " workers") + "</span>" +
+            (required === 1 ? " worker" : " workers") +
+            (minPopulation ? " + " + minPopulation + " population" : "") + "</span>" +
           '<span class="slot-state">UNDER CONSTRUCTION</span>' +
           '<span class="construction-stripes"><span></span></span>' +
         "</span>" +
@@ -335,6 +383,24 @@ function slotTileHTML(system, index, workforce) {
      therefore shows its own level and, while a refit is waiting, a button
      priced at half the building's build cost. */
   const refit = buildingRefitHTML(system, index, building);
+  const crewStepper = facilityCrewHTML(system, index, planEntry);
+  const side = '<span class="slot-side">' + crewStepper + refit + "</span>";
+  const levelLine = levelName ? " · " + levelName.toUpperCase() : "";
+
+  if (required > 0 && !eligible) {
+    return (
+      '<div class="slot-tile idle blocked">' +
+        '<span class="slot-emoji" aria-hidden="true">' + def.emoji + "</span>" +
+        '<span class="slot-main">' +
+          '<span class="slot-name">' + def.name + levelChip + "</span>" +
+          '<span class="slot-yield">Needs a colony of ' + minPopulation + " population · would produce " +
+            buildingScaledYieldText(building.type, 1, level) + " with " + required + " workers</span>" +
+          '<span class="slot-state">BLOCKED · NEEDS ' + minPopulation + " POPULATION</span>" +
+        "</span>" +
+        side +
+      "</div>"
+    );
+  }
 
   if (required > 0 && assigned === 0) {
     return (
@@ -342,10 +408,10 @@ function slotTileHTML(system, index, workforce) {
         '<span class="slot-emoji" aria-hidden="true">' + def.emoji + "</span>" +
         '<span class="slot-main">' +
           '<span class="slot-name">' + def.name + levelChip + "</span>" +
-          '<span class="slot-yield">No workers assigned · no output · upkeep still paid</span>' +
-          '<span class="slot-state">IDLE · 0/' + required + " WORKERS</span>" +
+          '<span class="slot-yield">No workers assigned · no output until crewed</span>' +
+          '<span class="slot-state">IDLE' + levelLine + " · 0/" + required + " WORKERS</span>" +
         "</span>" +
-        '<span class="slot-side">' + refit + "</span>" +
+        side +
       "</div>"
     );
   }
@@ -357,9 +423,10 @@ function slotTileHTML(system, index, workforce) {
         '<span class="slot-main">' +
           '<span class="slot-name">' + def.name + levelChip + "</span>" +
           '<span class="slot-yield">' + buildingScaledYieldText(building.type, ratio, level) + "</span>" +
-          '<span class="slot-state">UNDERSTAFFED · ' + assigned + "/" + required + " WORKERS · " + percent + "% OUTPUT</span>" +
+          '<span class="slot-state">UNDERSTAFFED' + levelLine + " · " + assigned + "/" + required +
+            " WORKERS · " + percent + "% OUTPUT</span>" +
         "</span>" +
-        '<span class="slot-side">' + refit + "</span>" +
+        side +
       "</div>"
     );
   }
@@ -371,9 +438,9 @@ function slotTileHTML(system, index, workforce) {
       '<span class="slot-main">' +
         '<span class="slot-name">' + def.name + levelChip + "</span>" +
         '<span class="slot-yield">' + buildingYieldText(building.type, level) + "</span>" +
-        '<span class="slot-state">ONLINE · ' + crew + "</span>" +
+        '<span class="slot-state">ONLINE' + levelLine + " · " + crew + "</span>" +
       "</span>" +
-      '<span class="slot-side">' + refit + "</span>" +
+      side +
     "</div>"
   );
 }
@@ -787,7 +854,8 @@ function sectorLedgerHTML(sectorId) {
   }
   parts.push(
     '<p class="planet-footnote">Energy and minerals are local to ' + sector.name +
-      ". Buildings, ships, structures and upkeep are paid from this sector's own stockpile. Research and influence are empire-wide.</p>" +
+      ". Buildings, ships, structures and upkeep are paid from this sector's own stockpile. " +
+      "Net per turn is projected at the requested population maintenance. Research and influence are empire-wide.</p>" +
     "</div>"
   );
   return parts.join("");
@@ -1103,7 +1171,8 @@ function worldTabHTML(system, charted, row, col) {
     parts.push(
       '<div class="planet-section">' +
         '<div class="planet-section-head"><h3>COLONIZATION</h3><span class="slot-count">' + size.name.toUpperCase() + " PLANET · " + size.slots + " SLOTS</span></div>" +
-        '<div class="slot-lock-note"><span>🪐</span><span>This ' + size.name.toLowerCase() + " planet opens with " + size.slots + " building slots and 1 population." +
+        '<div class="slot-lock-note"><span>🪐</span><span>This ' + size.name.toLowerCase() + " planet opens with " + size.slots + " building slots and " +
+          getEconomyConfig().startingPopulation.colony + " population." +
           (bonus
             ? " It also has " + bonus + " locked bonus " + (bonus === 1 ? "slot" : "slots") + " that can be opened later with energy and minerals."
             : " It has no bonus slots.") + "</span></div>" +
@@ -1116,7 +1185,11 @@ function worldTabHTML(system, charted, row, col) {
           "</div>" +
           (reason ? '<div class="cost-line text-bad">' + reason + "</div>" : "") +
         "</div>" +
-        '<p class="planet-footnote">Each colonized system adds +1 energy upkeep per turn. A new colony starts with one founding shelter and one population: fund its mineral housing upkeep and energy sustenance upkeep from the population menu to grow. A building without workers still pays upkeep. Workers are assigned in slot order.</p>' +
+        '<p class="planet-footnote">Each colonized system adds +1 energy overhead per turn. A new colony starts with ' +
+          getEconomyConfig().startingPopulation.colony +
+          ' people. They need P^1.1 energy every turn and P^(1/0.9) minerals invested in housing; fund both from the population menu. A level-1 facility needs ' +
+          getBuildingMinPopulation("power", 1) + ' population and ' + getBuildingWorkers("power", 1) +
+          ' workers. A frontier world will likely need energy and minerals shipped in by a trading center.</p>' +
       "</div>"
     );
     parts.push(builderPlanetNoteHTML(row, col));
@@ -1150,7 +1223,9 @@ function worldTabHTML(system, charted, row, col) {
 
   const workforceSummary = workforce.jobsTotal === 0
     ? "NO JOBS YET"
-    : workforce.jobsStaffed + " / " + workforce.jobsTotal + " POSTS STAFFED";
+    : workforce.jobsStaffed + " / " + workforce.jobsTotal + " POSTS · " +
+      workforce.availableWorkers + " FREE" +
+      (workforce.blockedBuildings ? " · " + workforce.blockedBuildings + " BLOCKED" : "");
   parts.push(
     '<div class="planet-section">' +
       '<div class="planet-section-head"><h3>POPULATION</h3><span class="slot-count">' + workforceSummary + "</span></div>" +
@@ -1178,7 +1253,17 @@ function worldTabHTML(system, charted, row, col) {
   parts.push(sectorLedgerHTML(system.sectorId));
   parts.push(builderPlanetNoteHTML(row, col));
   parts.push(
-    '<p class="planet-footnote">Local yields are shown before empire modifiers. Workers are assigned in slot order: a Mine needs 2, while a Power Plant, Lab or Embassy needs 1. A building with no workers produces nothing but still pays its energy upkeep; 1 of 2 mine workers means 50% output. Tap the population card to manage the two standing upkeeps: minerals pay for houses (the hard population cap) and energy pays for sustenance (the growth rate). Both are charged to this sector every turn. Colony overhead: 1 energy per turn.</p>'
+    '<p class="planet-footnote">Local yields are shown before empire modifiers. Power Plants and Mines have four levels: ' +
+      getBuildingMinPopulation("power", 1) + '/' + getBuildingMinPopulation("power", 2) + '/' +
+      getBuildingMinPopulation("power", 3) + '/' + getBuildingMinPopulation("power", 4) +
+      ' minimum population and ' + getBuildingWorkers("power", 1) + '/' + getBuildingWorkers("power", 2) + '/' +
+      getBuildingWorkers("power", 3) + '/' + getBuildingWorkers("power", 4) +
+      ' workers for ' + getBuildingOutput("power", 1).energy + '/' + getBuildingOutput("power", 2).energy + '/' +
+      getBuildingOutput("power", 3).energy + '/' + getBuildingOutput("power", 4).energy + ' output. ' +
+      'Use the − / + crew buttons on a facility to pin its workers; without orders the colony follows its automatic crew strategy (round robin by default). ' +
+      'Tap the population card to fund energy maintenance and housing investment as percentages of the full requirement. ' +
+      'Population maintenance is paid first, then colony overhead and building upkeep. Colony overhead: ' +
+      CONFIG.colonyEnergyUpkeep + ' energy per turn.</p>'
   );
   return parts.join("");
 }

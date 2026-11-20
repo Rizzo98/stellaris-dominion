@@ -195,7 +195,23 @@
   font-family:var(--mono);font-size:6.7px;font-weight:700;letter-spacing:.07em;color:var(--faint);
 }
 .slot-tile .slot-plus{font-size:15px;color:var(--faint);text-anchor:middle;justify-self:end}
-.slot-tile .slot-side{display:flex;align-items:center;justify-content:flex-end;justify-self:end}
+.slot-tile .slot-side{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:4px;justify-self:end}
+/* Explicit crew controls on a completed facility. The colony staffs itself
+   in slot order until the player pins a crew here. */
+.slot-crew{display:flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:7px;background:rgba(8,15,25,.75);padding:1px}
+.slot-crew-btn{
+  width:24px;height:24px;display:grid;place-items:center;
+  font-size:12px;line-height:1;color:var(--muted);
+  background:rgba(22,37,56,.7);border-radius:5px;
+}
+.slot-crew-btn:active{background:rgba(34,55,80,.95);color:var(--text)}
+.slot-crew-btn:disabled{opacity:.3}
+.slot-crew-value{
+  min-width:24px;text-align:center;
+  font-family:var(--mono);font-size:7px;font-weight:750;color:var(--text);
+}
+.population-chip.bad{color:var(--red);border-color:rgba(255,122,122,.24)}
+.slot-tile.idle.blocked .slot-state{color:var(--red)}
 .slot-tile .slot-level{
   display:inline-block;margin-left:5px;vertical-align:1px;
   font-family:var(--mono);font-size:6.4px;font-weight:750;letter-spacing:.05em;

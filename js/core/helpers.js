@@ -16,6 +16,15 @@ function formatAmount(value) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+/* Population growth is small at low population (3 × 5% = 0.15), so the
+   normal one-decimal formatter would round 0.15 up to 0.2 and make the
+   'next population' turn count look wrong. Growth keeps two decimals. */
+function formatGrowthAmount(value) {
+  const rounded = Math.round((Number(value) || 0) * 100) / 100;
+  if (rounded === 0) return "0";
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0$/, "");
+}
+
 function formatSigned(value) {
   const rounded = Math.round(value * 10) / 10;
   if (rounded === 0) return "0";
@@ -739,17 +748,64 @@ function getBuildingLevel(slot) {
   return clamp(raw, 1, getBuildingMaxLevel(slot.type));
 }
 
-/* Level 1 output plus the data file's per-level increment. */
+/* The shared facility table is the single source of truth for Power Plants
+   and Mines. Support buildings (Lab, Embassy) keep the older output/perLevel
+   pairing. */
+function getFacilityLevelDef(level) {
+  const levels = (CONFIG.economy && CONFIG.economy.facilities && CONFIG.economy.facilities.levels) || [];
+  const lv = clamp(Math.floor(typeof level === "number" ? level : 1), 1, levels.length || 1);
+  return levels[lv - 1] || { level: lv, name: "Level " + lv, minPopulation: 0, workers: 0, output: 0 };
+}
+
+function getBuildingFacilityLevelDef(type, level) {
+  const def = BUILDINGS[type];
+  if (!def || !def.facility) return null;
+  return getFacilityLevelDef(level);
+}
+
 function getBuildingOutput(type, level) {
   const def = BUILDINGS[type];
   if (!def) return {};
   const lv = clamp(Math.floor(typeof level === "number" ? level : 1), 1, getBuildingMaxLevel(type));
+  if (def.facility) {
+    const levelDef = getBuildingFacilityLevelDef(type, lv);
+    const output = {};
+    if (levelDef && def.resource) output[def.resource] = levelDef.output;
+    return output;
+  }
   const output = Object.assign({}, def.output);
   const perLevel = def.perLevel || {};
   Object.keys(perLevel).forEach(function (key) {
     output[key] = (output[key] || 0) + perLevel[key] * (lv - 1);
   });
   return output;
+}
+
+/* Facility levels need different crews. Support buildings keep one worker. */
+function getBuildingWorkers(type, level) {
+  const def = BUILDINGS[type];
+  if (!def) return 0;
+  if (def.facility) {
+    const levelDef = getBuildingFacilityLevelDef(type, level == null ? 1 : level);
+    return levelDef ? levelDef.workers : 0;
+  }
+  return def.workers || 0;
+}
+
+/* A production facility is locked until the colony reaches this population.
+   Support buildings have no minimum. */
+function getBuildingMinPopulation(type, level) {
+  const def = BUILDINGS[type];
+  if (!def || !def.facility) return 0;
+  const levelDef = getBuildingFacilityLevelDef(type, level == null ? 1 : level);
+  return levelDef ? levelDef.minPopulation : 0;
+}
+
+function getBuildingLevelName(type, level) {
+  const def = BUILDINGS[type];
+  if (!def || !def.facility) return "";
+  const levelDef = getBuildingFacilityLevelDef(type, level == null ? 1 : level);
+  return levelDef ? levelDef.name : "";
 }
 
 /* "Half the value of the building itself": a share of its mineral build
@@ -766,15 +822,4 @@ function getBuildingUpgradeCost(type) {
 
 function getBuildingUpkeep(type) {
   return BUILDINGS[type].energyUpkeep || 0;
-}
-
-function getBuildingWorkers(type) {
-  return BUILDINGS[type].workers || 0;
-}
-
-/* Every colony owns a founding shelter; extra houses are bought with the
-   population's mineral upkeep (see core/colony.js). */
-function getBasePopulationCap(system) {
-  if (!system.colonized) return 0;
-  return system.home ? CONFIG.population.homeBaseCap : CONFIG.population.colonyBaseCap;
 }

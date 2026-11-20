@@ -69,10 +69,10 @@ function renderTopbar() {
   }
   if (els.ledgerGlobal) els.ledgerGlobal.textContent = "🔬🏛 EMPIRE-WIDE";
 
-  els.valEnergy.textContent = values.energy;
-  els.valMinerals.textContent = values.minerals;
-  els.valResearch.textContent = values.research;
-  els.valInfluence.textContent = values.influence;
+  els.valEnergy.textContent = formatAmount(values.energy);
+  els.valMinerals.textContent = formatAmount(values.minerals);
+  els.valResearch.textContent = formatAmount(values.research);
+  els.valInfluence.textContent = formatAmount(values.influence);
   els.valEnergy.classList.toggle("text-bad", values.energy < 0);
   els.valMinerals.classList.toggle("text-bad", values.minerals < 0);
   els.valResearch.classList.toggle("text-bad", values.research < 0);
@@ -101,8 +101,8 @@ function renderTopbar() {
 }
 
 function setResourceTexts(values) {
-  els.valEnergy.textContent = values.energy;
-  els.valMinerals.textContent = values.minerals;
-  els.valResearch.textContent = values.research;
-  els.valInfluence.textContent = values.influence;
+  els.valEnergy.textContent = formatAmount(values.energy);
+  els.valMinerals.textContent = formatAmount(values.minerals);
+  els.valResearch.textContent = formatAmount(values.research);
+  els.valInfluence.textContent = formatAmount(values.influence);
 }

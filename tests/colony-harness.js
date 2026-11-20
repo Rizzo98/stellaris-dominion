@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 /* ============================================================
-   COLONY HARNESS — logic checks for planet size, slots, population
-   houses/sustenance, growth and partial staffing
+   COLONY HARNESS — the new colony economy
    The app intentionally has no build step, so this harness loads the
    classic browser scripts in a Node VM with tiny UI stubs. Run it with:
 
        node tests/colony-harness.js
 
-   It covers the 25/50/25 planet-size roll, locked bonus slots, slot
-   unlocking, worker assignment by slot order, partial production, full
-   upkeep for unstaffed buildings, the population housing/sustenance
-   policy, saturating growth, the hard house cap, mineral/energy
-   population upkeep and fractional income carry.
+   It covers planet size and slots, the four facility levels, minimum
+   population gates, worker allocation (automatic and pinned), the
+   P^1.1 / M^0.9 formulas, happiness, growth, the maintenance percentage
+   policy, sector allocation and the guarantee that no ledger goes negative.
    ============================================================ */
 
 const fs = require("fs");
@@ -37,6 +35,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",
@@ -123,8 +122,10 @@ function createContext() {
         planetSize: "large",
         bonusSlots: 0,
         unlockedBonusSlots: 0,
-        population: 1,
-        populationUpkeep: { housing: 0, sustenance: 0 },
+        population: 5,
+        maintenance: { energy: 100, minerals: 100 },
+        workerOrders: {},
+        economyReport: null,
         growthProgress: 0,
         foundedTurn: 1
       };
@@ -138,6 +139,10 @@ function createContext() {
     }
     function useSystems(list) {
       state.systems = list;
+    }
+    function stock(energy, minerals) {
+      setSectorStock("sec-core", "energy", energy);
+      setSectorStock("sec-core", "minerals", minerals);
     }
   `, context, { filename: "colony-harness-helpers" });
   return context;
@@ -169,12 +174,50 @@ function testPlanetSizeRolls() {
   ok(run("state.systems.every(s => s.bonusSlots >= 0 && s.bonusSlots <= CONFIG.planetSlots.bonus.max)"),
     "every generated system has 0-2 bonus slots");
   ok(run("!!state.systems.find(s => s.home)"), "the capital is generated");
-  ok(run("state.systems.find(s => s.home).planetSize === getPlanetSizeDef(state.systems.find(s => s.home).planetSize).id"),
-    "the capital gets a planet size too");
+  eq(run("getColonyPopulation(state.systems.find(s => s.home))"),
+    run("getEconomyConfig().startingPopulation.home"),
+    "the capital starts at the configured home population");
+}
 
-  const a = run("JSON.stringify(createGalaxy(CONFIG.galaxy.seed).systems.map(s => [s.id, s.planetSize, s.bonusSlots]))");
-  const b = run("JSON.stringify(createGalaxy(CONFIG.galaxy.seed).systems.map(s => [s.id, s.planetSize, s.bonusSlots]))");
-  eq(a, b, "planet sizes and bonus slots are deterministic per seed");
+function testStartingColony() {
+  reset();
+  const home = run("state.systems.find(function (system) { return system.home; })");
+  eq(home.population, 3, "the capital starts at 3 population");
+  eq(home.slots[0].type, "power", "the first starter facility is a Power Plant");
+  eq(home.slots[1].type, "mine", "the second starter facility is a Mine");
+  eq(home.slots[0].level, 1, "the starter Power Plant is level 1");
+  eq(home.slots[1].level, 1, "the starter Mine is level 1");
+  eq(home.slots[0].underConstruction, false, "the starter Power Plant is already built");
+  eq(home.slots[1].underConstruction, false, "the starter Mine is already built");
+
+  let plan = context.getWorkforcePlan(home);
+  eq(plan.strategy, "roundRobin", "the capital starts on round robin");
+  eq(context.getWorkerStrategy(home), "roundRobin", "the default strategy is round robin");
+  eq(plan.entries.length, 2, "the capital has two starting facilities");
+  eq(plan.entries[0].eligible, true, "the level 1 gate opens at 3 population");
+  eq(plan.entries[0].workersAssigned, 2, "round robin gives the Power Plant 2 workers");
+  eq(plan.entries[1].workersAssigned, 1, "round robin gives the Mine 1 worker");
+  eq(plan.entries[0].staffedRatio, 0.5, "two of four Power Plant workers is 50% output");
+  eq(plan.entries[1].staffedRatio, 0.25, "one of four Mine workers is 25% output");
+  eq(plan.partialBuildings, 2, "both starter facilities are understaffed");
+  eq(plan.idleBuildings, 0, "round robin leaves no starter facility idle");
+  eq(plan.blockedBuildings, 0, "neither starter facility is below its gate");
+  eq(plan.availableWorkers, 0, "every opening worker is assigned");
+
+  let production = context.getColonyProduction(home, plan);
+  eq(production.resources.energy, 8, "the 2-worker Power Plant adds 4 energy to the 4-energy baseline");
+  eq(production.resources.minerals, 6, "the 1-worker Mine adds 2 minerals to the 4-mineral baseline");
+
+  home.workerStrategy = "greedy";
+  plan = context.getWorkforcePlan(home);
+  eq(plan.strategy, "greedy", "the colony can switch to greedy");
+  eq(plan.entries[0].workersAssigned, 3, "greedy gives the Power Plant all 3 workers");
+  eq(plan.entries[1].workersAssigned, 0, "greedy leaves the Mine idle");
+  eq(plan.partialBuildings, 1, "the Power Plant is still understaffed");
+  eq(plan.idleBuildings, 1, "the Mine is idle under greedy");
+  production = context.getColonyProduction(home, plan);
+  eq(production.resources.energy, 10, "the greedy Power Plant adds 6 energy");
+  eq(production.resources.minerals, 4, "the idle Mine leaves only the baseline");
 }
 
 function testSlotModel() {
@@ -236,301 +279,454 @@ function testSlotUnlocking() {
   eq(run("getSystem('poor').unlockedBonusSlots"), 0, "a refused unlock does not open the slot");
 }
 
-function testWorkforceAndUpkeep() {
+function testFacilityLevels() {
+  eq(run("getBuildingOutput('mine', 1).minerals"), 8, "a level 1 mine yields 8 minerals");
+  eq(run("getBuildingOutput('mine', 2).minerals"), 16, "a level 2 mine yields 16 minerals");
+  eq(run("getBuildingOutput('mine', 3).minerals"), 32, "a level 3 mine yields 32 minerals");
+  eq(run("getBuildingOutput('mine', 4).minerals"), 64, "a level 4 mine yields 64 minerals");
+  eq(run("getBuildingOutput('power', 1).energy"), 8, "a level 1 power plant yields 8 energy");
+  eq(run("getBuildingOutput('power', 4).energy"), 64, "a level 4 power plant yields 64 energy");
+  eq(run("getBuildingOutput('power', 2).minerals"), undefined, "a power plant has no mineral output");
+
+  eq(run("getBuildingWorkers('mine', 1)"), 4, "level 1 needs 4 workers");
+  eq(run("getBuildingWorkers('mine', 2)"), 6, "level 2 needs 6 workers");
+  eq(run("getBuildingWorkers('mine', 3)"), 9, "level 3 needs 9 workers");
+  eq(run("getBuildingWorkers('mine', 4)"), 14, "level 4 needs 14 workers");
+  eq(run("getBuildingMinPopulation('mine', 1)"), 3, "level 1 needs a colony of 3");
+  eq(run("getBuildingMinPopulation('mine', 2)"), 15, "level 2 needs a colony of 15");
+  eq(run("getBuildingMinPopulation('mine', 3)"), 40, "level 3 needs a colony of 40");
+  eq(run("getBuildingMinPopulation('mine', 4)"), 100, "level 4 needs a colony of 100");
+  eq(run("getBuildingLevelName('power', 1)"), "Primitive", "level 1 is Primitive");
+  eq(run("getBuildingLevelName('power', 2)"), "Industrial", "level 2 is Industrial");
+  eq(run("getBuildingLevelName('power', 3)"), "Advanced", "level 3 is Advanced");
+  eq(run("getBuildingLevelName('power', 4)"), "Megastructural", "level 4 is Megastructural");
+
+  eq(run("getBuildingOutput('lab', 3).research"), 4, "the lab keeps its support-building table");
+  eq(run("getBuildingWorkers('lab', 3)"), 1, "a lab still needs one worker");
+  eq(run("getBuildingMinPopulation('lab', 1)"), 0, "a lab has no population gate");
+  eq(run("getBuildingUpkeep('mine')"), 0, "a mine pays no energy upkeep");
+  eq(run("getBuildingUpkeep('lab')"), 1, "a lab still draws one energy");
+}
+
+function testWorkforceAndProduction() {
+  reset();
+  const low = context.testSystem({
+    id: "low-pop",
+    population: 2,
+    buildings: [
+      { type: "mine", level: 1, underConstruction: false },
+      { type: "power", level: 1, underConstruction: false }
+    ]
+  });
+  context.useSystems([low]);
+  let plan = context.getWorkforcePlan(low);
+  eq(plan.population, 2, "the plan reads the population");
+  eq(plan.entries[0].eligible, false, "a level 1 facility is blocked below 3 population");
+  eq(plan.entries[0].workersAssigned, 0, "a blocked facility cannot take workers");
+  eq(plan.blockedBuildings, 2, "both facilities are blocked");
+  eq(plan.blockedJobs, 8, "the blocked posts are reported");
+  eq(plan.availableWorkers, 2, "everyone is free while the gate is closed");
+  let production = context.getColonyProduction(low, plan);
+  eq(production.resources.energy, 0, "a blocked power plant produces nothing");
+  eq(production.resources.minerals, 0, "a blocked mine produces nothing");
+
+  low.population = 4;
+  plan = context.getWorkforcePlan(low);
+  eq(plan.strategy, "roundRobin", "the fixture defaults to round robin");
+  eq(plan.entries[0].eligible, true, "the level 1 gate opens at 3 population");
+  eq(plan.entries[0].workersAssigned, 2, "round robin gives the mine 2 workers");
+  eq(plan.entries[1].workersAssigned, 2, "round robin gives the power plant 2 workers");
+  eq(plan.idleBuildings, 0, "nobody is idle at four population");
+  eq(plan.partialBuildings, 2, "both facilities are half staffed");
+  production = context.getColonyProduction(low, plan);
+  eq(production.resources.minerals, 4, "a half mine produces 4 minerals");
+  eq(production.resources.energy, 4, "a half power plant produces 4 energy");
+
+  low.workerStrategy = "greedy";
+  plan = context.getWorkforcePlan(low);
+  eq(plan.entries[0].workersAssigned, 4, "greedy fills the first facility");
+  eq(plan.entries[1].workersAssigned, 0, "greedy leaves the second facility idle");
+  eq(plan.idleBuildings, 1, "the second facility is idle under greedy");
+  production = context.getColonyProduction(low, plan);
+  eq(production.resources.minerals, 8, "the greedy mine produces 8 minerals");
+  eq(production.resources.energy, 0, "the idle power plant produces nothing");
+  low.workerStrategy = "roundRobin";
+
+  low.population = 6;
+  plan = context.getWorkforcePlan(low);
+  eq(plan.entries[0].workersAssigned, 3, "round robin gives the mine 3 of 6");
+  eq(plan.entries[1].workersAssigned, 3, "round robin gives the power plant 3 of 6");
+  eq(plan.entries[1].staffedRatio, 0.75, "the power plant is three-quarters staffed");
+  eq(plan.partialBuildings, 2, "both facilities are understaffed");
+  eq(plan.availableWorkers, 0, "everyone is assigned");
+  production = context.getColonyProduction(low, plan);
+  eq(production.resources.minerals, 6, "a three-quarter mine produces 6 minerals");
+  eq(production.resources.energy, 6, "a three-quarter power plant produces 6 energy");
+
+  low.population = 10;
+  plan = context.getWorkforcePlan(low);
+  eq(plan.entries[0].workersAssigned, 4, "the mine keeps 4 workers");
+  eq(plan.entries[1].workersAssigned, 4, "the power plant fills its crew");
+  eq(plan.availableWorkers, 2, "two people remain free");
+  eq(plan.jobsStaffed, 8, "eight posts are staffed");
+  eq(plan.jobsTotal, 8, "there are eight total posts");
+  production = context.getColonyProduction(low, plan);
+  eq(production.resources.minerals, 8, "the mine produces its full output");
+  eq(production.resources.energy, 8, "the power plant produces its full output");
+
+  const tech = context.testSystem({
+    id: "level-two",
+    population: 15,
+    buildings: [
+      { type: "mine", level: 2, underConstruction: false },
+      { type: "power", level: 2, underConstruction: false }
+    ]
+  });
+  context.useSystems([tech]);
+  plan = context.getWorkforcePlan(tech);
+  eq(plan.entries[0].workersAssigned, 6, "a level 2 mine takes 6 workers");
+  eq(plan.entries[1].workersAssigned, 6, "a level 2 power plant takes 6 workers");
+  eq(plan.availableWorkers, 3, "three people remain free");
+  production = context.getColonyProduction(tech, plan);
+  eq(production.resources.minerals, 16, "a level 2 mine produces 16");
+  eq(production.resources.energy, 16, "a level 2 power plant produces 16");
+
+  tech.population = 12;
+  plan = context.getWorkforcePlan(tech);
+  eq(plan.entries[0].eligible, false, "a level 2 facility is blocked below 15");
+  eq(plan.entries[0].workersAssigned, 0, "the blocked mine takes no workers");
+}
+
+function testPinnedCrews() {
   reset();
   const system = context.testSystem({
-    id: "workforce",
-    name: "Workforce",
-    planetSize: "large",
-    bonusSlots: 0,
-    population: 3,
-    /* The founding shelter holds 1; two paid houses make room for 3. */
-    populationUpkeep: { housing: 4, sustenance: 0 },
+    id: "pinned",
+    population: 10,
     buildings: [
-      { type: "mine", underConstruction: false },
-      { type: "power", underConstruction: false },
-      { type: "lab", underConstruction: false }
+      { type: "mine", level: 1, underConstruction: false },
+      { type: "power", level: 1, underConstruction: false }
     ]
   });
   context.useSystems([system]);
-
   let plan = context.getWorkforcePlan(system);
-  eq(plan.jobsTotal, 4, "mine 2 + power 1 + lab 1 = 4 worker posts");
-  eq(plan.jobsStaffed, 3, "three population staff the first three posts");
-  eq(plan.idleJobs, 1, "the lab has no worker");
-  eq(plan.idleBuildings, 1, "one completed building is idle");
-  eq(plan.partialBuildings, 0, "no building is partial at three population");
-  eq(plan.availableWorkers, 0, "all three population are assigned");
-  eq(plan.baseHousing, 1, "a normal colony starts with one founding shelter");
-  eq(plan.paidHouses, 2, "4 minerals of housing upkeep pay for two houses");
-  eq(plan.cap, 3, "housing cap is the founding shelter plus paid houses");
-  eq(plan.housingUpkeep, 4, "the housing upkeep is the mineral cost of those houses");
-  eq(plan.sustenanceUpkeep, 0, "no sustenance upkeep is set yet");
-  eq(plan.sustenance.percent, 0, "sustenance is at 0% without energy upkeep");
-  eq(plan.entries[0].workersAssigned, 2, "the mine takes two workers first");
-  eq(plan.entries[1].workersAssigned, 1, "the power plant takes the third worker");
-  eq(plan.entries[2].workersAssigned, 0, "the lab gets none");
+  eq(plan.hasOrders, false, "a fresh colony has no explicit orders");
+  eq(plan.entries[0].workersAssigned, 4, "automatic round robin fills the mine");
+  eq(plan.entries[1].workersAssigned, 4, "automatic round robin fills the power plant");
 
-  let planet = context.getPlanetBreakdown(system);
-  eq(planet.output.minerals, 3, "a fully staffed mine produces its full 3 minerals");
-  eq(planet.output.energy, 4, "the power plant produces 4 energy");
-  eq(planet.output.research, 0, "the idle lab produces no research");
-  eq(planet.buildingUpkeep, 2, "mine and lab upkeep are paid even with the lab idle");
-  eq(planet.mineralUpkeep, 4, "the planet pays its population housing upkeep in minerals");
-  eq(planet.populationUpkeep.minerals, 4, "the population upkeep names the housing draw");
-  eq(planet.populationUpkeep.energy, 0, "no sustenance energy is drawn yet");
-  eq(planet.upkeep, 3, "colony overhead and building energy upkeep are unchanged");
-  eq(planet.mineralUpkeepItems[0].label, "Population housing", "the housing draw is itemised");
-  eq(planet.counts.lab, 1, "idle buildings still count as built");
-  eq(planet.idleBuildings, 1, "the breakdown reports the idle building");
+  let result = context.adjustFacilityWorkersOrder(system, 0, -1);
+  eq(result.ok, true, "the mine can give up a worker");
+  eq(system.workerOrders[0], 3, "the mine is pinned at 3");
+  eq(system.workerOrders[1], 4, "the other crew is pinned too, so nothing reshuffles");
+  plan = context.getWorkforcePlan(system);
+  eq(plan.hasOrders, true, "the colony now uses explicit orders");
+  eq(plan.entries[0].workersAssigned, 3, "the mine runs one worker short");
+  eq(plan.entries[0].staffedRatio, 0.75, "three of four is 75% output");
+  eq(plan.availableWorkers, 3, "three workers are free");
+  eq(plan.partialBuildings, 1, "the mine is understaffed");
 
+  result = context.adjustFacilityWorkersOrder(system, 0, 1);
+  eq(result.ok, true, "the free worker can return to the mine");
+  eq(system.workerOrders[0], 4, "the mine is back to a full crew");
+  eq(context.getWorkforcePlan(system).availableWorkers, 2, "two workers remain free");
+
+  result = context.adjustFacilityWorkersOrder(system, 1, 1);
+  eq(result.ok, false, "a full crew cannot grow");
+  ok(result.reason.indexOf("full crew") !== -1, "the refusal explains the full crew");
+
+  context.clearWorkerOrders(system);
+  plan = context.getWorkforcePlan(system);
+  eq(plan.hasOrders, false, "clearing the orders returns to automatic staffing");
+  eq(plan.entries[0].workersAssigned, 4, "the mine is auto-staffed again");
+
+  system.population = 6;
+  system.workerOrders = { 0: 4, 1: 4 };
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 4, "the first order keeps its full crew");
+  eq(plan.entries[1].workersAssigned, 2, "later orders are capped by the population");
+  eq(plan.assignedWorkers, 6, "total assigned workers never exceeds population");
+  ok(context.adjustFacilityWorkersOrder(system, 1, 1).ok === false,
+    "a full population cannot be over-assigned");
   system.population = 2;
   plan = context.getWorkforcePlan(system);
-  eq(plan.entries[0].workersAssigned, 2, "the mine keeps its two workers");
-  eq(plan.entries[1].workersAssigned, 0, "the power plant is idle at two population");
-  eq(plan.jobsStaffed, 2, "only the mine is staffed");
-  eq(plan.idleBuildings, 2, "power and lab are both idle");
-  planet = context.getPlanetBreakdown(system);
-  eq(planet.output.energy, 0, "an idle power plant produces nothing");
-  eq(planet.output.minerals, 3, "the mine still produces full output");
-  eq(planet.buildingUpkeep, 2, "idle buildings still pay upkeep");
-  eq(planet.mineralUpkeep, 4, "housing is paid for the houses, not the heads");
-
-  system.population = 1;
-  plan = context.getWorkforcePlan(system);
-  eq(plan.entries[0].workersAssigned, 1, "one worker goes to the 2-worker mine");
-  eq(plan.entries[0].staffedRatio, 0.5, "the mine is half staffed");
-  eq(plan.partialBuildings, 1, "the mine is counted as understaffed");
-  eq(plan.idleBuildings, 2, "power and lab are still idle");
-  planet = context.getPlanetBreakdown(system);
-  eq(planet.output.minerals, 1.5, "one of two mine workers produces 50% of 3 minerals");
-  eq(planet.output.energy, 0, "the power plant is idle");
-  eq(planet.sources.minerals[0].sub.indexOf("1/2 workers") !== -1, true,
-    "the mineral source shows the partial crew");
-  eq(planet.buildingUpkeep, 2, "upkeep is not reduced by partial staffing");
-  eq(planet.upkeep, 3, "colony overhead plus both building upkeeps");
-
-  const econ = context.getEconomy();
-  eq(econ.income.minerals, 1.5, "empire mineral income keeps the half-staffed yield");
-  eq(econ.upkeep, 3, "empire upkeep includes idle buildings");
-  eq(econ.mineralUpkeep, 4, "empire upkeep includes the population housing draw");
-  eq(econ.netMinerals, -2.5, "net minerals subtract housing upkeep");
-  eq(econ.sources.minerals[0].label, "Solara Core · Workforce · Mines ×1",
-    "empire sources name the sector, colony and building");
-  eq(econ.sources.minerals[0].amount, 1.5, "empire sources carry the partial amount");
-
-  const sectorEcon = context.getSectorEconomy("sec-core");
-  eq(sectorEcon.income.minerals, 1.5, "the sector ledger keeps the half-staffed yield");
-  eq(sectorEcon.net.minerals, -2.5, "the sector's net minerals subtract housing upkeep");
-  eq(sectorEcon.upkeep, 3, "the sector pays its colony and building upkeep");
-  eq(sectorEcon.mineralUpkeep, 4, "the sector pays the population housing upkeep too");
-  eq(sectorEcon.mineralUpkeepItems[0].label, "Population housing ×1", "the housing draw is aggregated");
+  eq(plan.entries[0].eligible, false, "the population gate blocks the facility again");
+  eq(plan.entries[1].eligible, false, "and blocks the second facility too");
+  eq(plan.assignedWorkers, 0, "a blocked colony assigns nobody");
 }
 
-function testPopulationHousing() {
+function testWorkerStrategies() {
   reset();
-  ok(run("!BUILDINGS.residential"), "the residential building is gone from the build table");
-  eq(run("BUILDING_ORDER.indexOf('residential')"), -1, "housing is no longer a building type");
+  const home = run("state.systems.find(function (system) { return system.home; })");
+  eq(context.getWorkerStrategy(home), "roundRobin", "new colonies default to round robin");
+  home.workerStrategy = "bogus";
+  eq(context.getWorkerStrategy(home), "roundRobin", "an unknown strategy falls back to round robin");
+  home.workerStrategy = "greedy";
+  eq(context.getWorkerStrategy(home), "greedy", "a valid strategy is kept");
+  eq(context.getWorkerStrategyLabel("greedy"), "GREEDY", "strategy labels come from config");
 
-  const small = context.testSystem({ id: "small-colony", planetSize: "small", population: 1 });
-  eq(context.getMaxExtraHouses(small), 3, "a small planet can pay for 3 extra houses");
-  eq(context.getMaxHousingUpkeep(small), 6, "3 extra houses cost 6 minerals of upkeep");
-  eq(context.getPopulationHousingCap(small), 1, "with no policy the cap is the founding shelter");
-  eq(context.getHousingCapForUpkeep(small, 2), 2, "2 minerals of upkeep buys one house");
-  eq(context.getHousingCapForUpkeep(small, 6), 4, "6 minerals of upkeep fills the small planet");
-  eq(context.getHousingCapForUpkeep(small, 100), 4, "housing never exceeds what the planet can pay for");
-
-  const large = context.testSystem({ id: "large-colony", planetSize: "large", population: 1 });
-  eq(context.getMaxExtraHouses(large), 6, "a large planet can pay for 6 extra houses");
-  eq(context.getMaxHousingUpkeep(large), 12, "6 extra houses cost 12 minerals of upkeep");
-
-  large.populationUpkeep = { housing: 999, sustenance: 999 };
-  const policy = context.getPopulationPolicy(large);
-  eq(policy.housing, 12, "housing upkeep is clamped to the planet's extra houses");
-  eq(policy.sustenance, context.getMaxSustenanceUpkeep(large), "sustenance upkeep is clamped too");
-  eq(context.getPopulationHousingCap(large), 7, "the cap stops at the founding shelter plus six houses");
-
-  const colony = context.testSystem({
-    id: "hard-cap",
-    planetSize: "medium",
+  const system = context.testSystem({
+    id: "strategy-three",
     population: 3,
-    populationUpkeep: { housing: 4, sustenance: 0 }
+    buildings: [
+      { type: "power", level: 1, underConstruction: false },
+      { type: "mine", level: 1, underConstruction: false },
+      { type: "lab", level: 1, underConstruction: false }
+    ]
   });
-  context.useSystems([colony]);
-  eq(context.getPopulationHousingCap(colony), 3, "two paid houses house exactly three people");
-  eq(context.getPopulationUpkeepChangeReason(colony, "housing", -1),
-    "Housing can't fall below the current population.",
-    "a housing cut that would evict people is refused");
-  eq(context.getPopulationUpkeepChangeReason(colony, "housing", 1), null,
-    "raising housing is allowed");
-  eq(context.getPopulationUpkeepChangeReason(colony, "sustenance", -1),
-    "Already at zero sustenance upkeep.",
-    "the sustenance stepper stops at zero");
-}
-
-function testPopulationSustenance() {
-  const cfg = context.getPopulationSustenanceConfig();
-  eq(cfg.populationPerEnergy, 2, "one energy feeds two population");
-  eq(cfg.maxMult, 1.25, "sustenance tops out at 125%");
-
-  let state = context.getSustenanceState(3, 0);
-  eq(state.percent, 0, "no upkeep means 0% sustenance");
-  eq(state.tier.id, "starving", "0% is starving");
-  eq(state.mult, 0, "starvation stops growth");
-
-  state = context.getSustenanceState(3, 1);
-  eq(state.supply, 2, "1 energy feeds 2 people");
-  eq(state.demand, 3, "3 people need 3 servings");
-  eq(state.percent, 67, "2 of 3 fed is 67%");
-  eq(state.tier.id, "frugal", "67% is frugal");
-  near(state.mult, 2 / 3, 1e-9, "the growth multiplier is 2/3");
-
-  state = context.getSustenanceState(2, 1);
-  eq(state.percent, 100, "1 energy feeds 2 people exactly");
-  eq(state.tier.id, "content", "100% is content");
-  eq(state.mult, 1, "content means full growth");
-
-  state = context.getSustenanceState(3, 5);
-  eq(state.supply, 10, "5 energy feeds 10");
-  eq(state.capped, true, "surplus food is capped");
-  eq(state.percent, 125, "the multiplier caps at 125%");
-  eq(state.tier.id, "thriving", "125% is thriving");
-
-  eq(context.getSustenanceState(1, 1).tier.id, "thriving", "a surplus at low population is thriving");
-  eq(context.getSustenanceState(8, 1).tier.id, "malnourished", "1 energy for 8 people is malnourishment");
-}
-
-function testPopulationGrowth() {
-  reset();
-  const barren = context.testSystem({ id: "barren", planetSize: "small", population: 1 });
-  context.useSystems([barren]);
-  let plan = context.getWorkforcePlan(barren);
-  eq(plan.cap, 1, "without paid houses the cap is the founding shelter");
-  eq(plan.growthBlockedBy, "housing", "the founding shelter is full");
-  eq(plan.growthPerTurn, 0, "growth is zero at the cap");
-  context.growPopulations();
-  eq(barren.population, 1, "population stays at the cap");
-
-  const colony = context.testSystem({
-    id: "growth",
-    planetSize: "small",
-    population: 2,
-    populationUpkeep: { housing: 4, sustenance: 1 }
-  });
-  context.useSystems([colony]);
-  plan = context.getWorkforcePlan(colony);
-  eq(plan.cap, 3, "two paid houses raise the cap to 3");
-  eq(plan.sustenance.percent, 100, "1 energy feeds the colony exactly");
-  near(plan.growthPerTurn, 0.5, 1e-9, "growth is 1.5 * 1.0 * 1/3");
-  eq(plan.turnsToNextPop, 2, "the next population needs two turns");
-  context.growPopulations();
-  eq(colony.population, 2, "half a population is banked after the first tick");
-  near(colony.growthProgress, 0.5, 1e-9, "the fraction is carried");
-  context.growPopulations();
-  eq(colony.population, 3, "the banked fraction completes the population");
-  eq(colony.growthProgress, 0, "the carry resets at the cap");
-  eq(context.getWorkforcePlan(colony).canGrow, false, "the colony stops at the house cap");
-
-  /* Housing room without sustenance does not grow. */
-  colony.population = 1;
-  colony.growthProgress = 0;
-  colony.populationUpkeep.sustenance = 0;
-  plan = context.getWorkforcePlan(colony);
-  eq(plan.housingRoom, 2, "there are empty houses");
-  eq(plan.sustenance.percent, 0, "but nothing feeds the colony");
-  eq(plan.growthBlockedBy, "sustenance", "growth is blocked by sustenance");
-  eq(plan.growthPerTurn, 0, "no sustenance means no growth");
-  context.growPopulations();
-  eq(colony.population, 1, "the colony does not grow unfed");
-
-  /* Sustenance scales growth: a surplus goes past the 100% rate. */
-  colony.populationUpkeep.sustenance = 1;
-  plan = context.getWorkforcePlan(colony);
-  eq(plan.sustenance.percent, 125, "a surplus is thriving at 125%");
-  near(plan.growthPerTurn, 1.25, 1e-9, "growth is 1.5 * 1.25 * 2/3");
-
-  /* The hard cap also settles a stale state above the houses. */
-  colony.population = 5;
-  colony.growthProgress = 0.5;
-  context.growPopulations();
-  eq(colony.population, 3, "population is clamped to the houses at the growth step");
-  eq(colony.growthProgress, 0, "the growth carry is dropped on the clamp");
-}
-
-function testPopulationActions() {
-  reset();
-  const system = context.testSystem({ id: "menu-colony", planetSize: "small", population: 1 });
   context.useSystems([system]);
-  run("state.phase = 'actions';");
+  let plan = context.getWorkforcePlan(system);
+  eq(plan.strategy, "roundRobin", "the three-facility fixture starts on round robin");
+  eq(plan.entries[0].workersAssigned, 1, "round robin gives the Power Plant one worker");
+  eq(plan.entries[1].workersAssigned, 1, "round robin gives the Mine one worker");
+  eq(plan.entries[2].workersAssigned, 1, "round robin gives the Lab one worker");
+  eq(plan.assignedWorkers, 3, "three people fill three posts");
 
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", 1), true, "raising the housing stepper succeeds");
-  eq(system.populationUpkeep.housing, 2, "one housing step costs 2 minerals");
-  eq(context.getPopulationHousingCap(system), 2, "the colony now has two houses");
-  eq(context.adjustPopulationUpkeep("menu-colony", "sustenance", 1), true, "raising sustenance succeeds");
-  eq(system.populationUpkeep.sustenance, 1, "one sustenance step costs 1 energy");
-  eq(context.getWorkforcePlan(system).sustenance.percent, 125,
-    "one energy feeds the single colonist with a surplus");
+  system.workerStrategy = "greedy";
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 3, "greedy fills the first facility first");
+  eq(plan.entries[1].workersAssigned, 0, "the second facility waits under greedy");
+  eq(plan.entries[2].workersAssigned, 0, "the third facility waits under greedy");
 
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", 1), true, "a second house can be funded");
-  eq(context.getPopulationHousingCap(system), 3, "two paid houses hold three people");
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", 1), true, "a third house fills the small planet");
-  eq(context.getPopulationHousingCap(system), 4, "the small planet reaches its size cap");
-  eq(context.getPopulationUpkeepChangeReason(system, "housing", 1), "At the maximum housing upkeep.",
-    "housing cannot exceed the planet size");
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", 1), false, "the extra step is refused");
-
-  system.population = 4;
-  eq(context.getPopulationUpkeepChangeReason(system, "housing", -1),
-    "Housing can't fall below the current population.",
-    "the menu refuses to evict people");
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", -1), false, "the eviction step is refused");
-  eq(system.populationUpkeep.housing, 6, "the refused step changes nothing");
-  eq(context.getPopulationHousingCap(system), 4, "the houses are unchanged");
-
-  system.population = 3;
-  eq(context.adjustPopulationUpkeep("menu-colony", "housing", -1), true,
-    "lowering housing is allowed above the population");
-  eq(system.populationUpkeep.housing, 4, "the mineral upkeep falls by one step");
-  eq(context.getPopulationHousingCap(system), 3, "the cap falls with it");
+  system.workerStrategy = "roundRobin";
+  system.workerOrders = { 0: 0, 1: 0, 2: 0 };
+  plan = context.getWorkforcePlan(system);
+  eq(plan.assignedWorkers, 0, "explicit zero orders override the strategy");
+  eq(plan.availableWorkers, 3, "three workers stay free under explicit orders");
+  context.clearWorkerOrders(system);
+  plan = context.getWorkforcePlan(system);
+  eq(plan.entries[0].workersAssigned, 1, "clearing orders returns to round robin");
+  eq(plan.entries[1].workersAssigned, 1, "the second facility shares again");
+  eq(plan.entries[2].workersAssigned, 1, "the third facility shares again");
 }
 
-function testPopulationUpkeepPayment() {
+function testFormulas() {
+  const cfg = context.getEconomyConfig();
+  eq(cfg.growthRate, 0.05, "the base growth rate is 5%");
+  eq(cfg.energyExponent, 1.1, "energy scales at P^1.1");
+  eq(cfg.housingExponent, 0.9, "housing scales at M^0.9");
+
+  near(context.getPopulationEnergyRequirement(10), Math.pow(10, 1.1), 1e-9,
+    "E_required is P^1.1");
+  near(context.getRequiredHousingMinerals(10), Math.pow(10, 1 / 0.9), 1e-9,
+    "the full housing investment is P^(1/0.9)");
+  near(context.getHousingCapacity(5), Math.pow(5, 0.9), 1e-9, "H is M^0.9");
+  eq(context.getPopulationEnergyRequirement(0), 0, "no population needs no energy");
+  eq(context.getRequiredHousingMinerals(0), 0, "no population needs no housing minerals");
+
+  const full = context.getColonyHappiness(12.5892541179, 12.9154966501, 10);
+  near(full.happiness, 100, 1e-6, "full energy and full housing are 100% happiness");
+  eq(full.housingDeficit, 0, "full housing leaves no deficit");
+  eq(full.normalizedHousingDeficit, 0, "the normalized deficit is zero");
+
+  const halfEnergy = context.getColonyHappiness(6.2946270589, 12.9154966501, 10);
+  near(halfEnergy.happiness, 50, 1e-6, "half the energy is half the happiness");
+  near(halfEnergy.energyFulfillment, 0.5, 1e-9, "G is 0.5");
+
+  const halfHousing = context.getColonyHappiness(12.5892541179, 5, 10);
+  near(halfHousing.housingCapacity, Math.pow(5, 0.9), 1e-9, "H uses the minerals spent");
+  near(halfHousing.normalizedHousingDeficit, (10 - Math.pow(5, 0.9)) / 10, 1e-9,
+    "h is the housing deficit over population");
+  near(halfHousing.happiness, 100 * (Math.pow(5, 0.9) / 10), 1e-9,
+    "housing fulfillment multiplies happiness");
+
+  const excess = context.getColonyHappiness(100, 100, 10);
+  eq(excess.happiness, 100, "excess energy and housing never exceed 100");
+  eq(excess.housingDeficit, 0, "excess housing leaves no deficit");
+
+  eq(context.getColonyHappiness(0, 0, 5).happiness, 0, "no energy and no housing is zero happiness");
+  eq(context.getColonyHappiness(0, 100, 0).happiness, 100, "an empty colony is trivially happy");
+
+  near(context.getPopulationGrowthForHappiness(10, 100), 0.5, 1e-9,
+    "10 people at 100% happiness grow by 0.5");
+  near(context.getPopulationGrowthForHappiness(10, 80), 0.4, 1e-9,
+    "10 people at 80% happiness grow by 0.4");
+  near(context.getPopulationGrowthForHappiness(10, 50), 0.25, 1e-9,
+    "10 people at 50% happiness grow by 0.25");
+  eq(context.getPopulationGrowthForHappiness(10, 0), 0, "0% happiness means no growth");
+}
+
+function testColonyReports() {
   reset();
   const system = context.testSystem({
-    id: "upkeep-colony",
-    planetSize: "small",
-    population: 2,
-    populationUpkeep: { housing: 4, sustenance: 1 }
+    id: "report",
+    population: 10,
+    maintenance: { energy: 50, minerals: 100 }
   });
   context.useSystems([system]);
-  run("setSectorStock('sec-core','energy',10); setSectorStock('sec-core','minerals',10);");
+  run("stock(100, 100)");
+  const report = context.getColonyEconomy(system);
+  near(report.energyRequired, Math.pow(10, 1.1), 1e-9, "the report carries E_required");
+  near(report.energySpent, Math.pow(10, 1.1) * 0.5, 1e-9, "50% energy buys half the requirement");
+  near(report.energyFulfillment, 0.5, 1e-9, "G follows the percentage");
+  near(report.housingCapacity, 10, 1e-6, "100% housing buys full capacity");
+  near(report.happiness, 50, 1e-6, "50% energy and full housing is 50% happiness");
+  near(report.growthAmount, 0.25, 1e-9, "growth is 10 × 5% × 50%");
+  eq(report.canGrow, true, "the colony can grow");
+  eq(report.growthBlockedBy, null, "nothing blocks growth");
+
+  system.maintenance = { energy: 100, minerals: 50 };
+  const housing = context.getColonyEconomy(system);
+  near(housing.mineralsSpent, Math.pow(10, 1 / 0.9) * 0.5, 1e-9,
+    "50% housing invests half the required minerals");
+  near(housing.normalizedHousingDeficit, (10 - housing.housingCapacity) / 10, 1e-9,
+    "the report carries the normalized housing deficit");
+  near(housing.happiness, (housing.housingCapacity / 10) * 100, 1e-9,
+    "happiness is the housing factor times full energy");
+
+  run("stock(0, 0)");
+  system.maintenance = { energy: 100, minerals: 100 };
+  const poor = context.getColonyEconomy(system);
+  eq(poor.energySpent, 0, "no stock means no energy spent");
+  eq(poor.mineralsSpent, 0, "no stock means no minerals spent");
+  eq(poor.happiness, 0, "no maintenance means no happiness");
+  eq(poor.growthAmount, 0, "no happiness means no growth");
+}
+
+function testGrowth() {
+  const system = context.testSystem({ id: "growth", population: 10 });
+  system.economyReport = { growthAmount: 0.5, happiness: 100 };
+  system.growthProgress = 0.4;
+  context.applyColonyGrowth(system);
+  eq(system.population, 10, "half a person is banked, not rounded up");
+  near(system.growthProgress, 0.9, 1e-9, "the fraction carries between turns");
+  context.applyColonyGrowth(system);
+  eq(system.population, 11, "the banked fraction completes a person");
+  near(system.growthProgress, 0.4, 1e-9, "the leftover fraction carries");
+
+  system.population = 10;
+  system.growthProgress = 0;
+  system.economyReport = { growthAmount: 5, happiness: 100 };
+  context.applyColonyGrowth(system);
+  eq(system.population, 15, "large growth adds all of its whole people");
+  near(system.growthProgress, 0, 1e-9, "no fraction is left");
+
+  system.population = 10;
+  system.growthProgress = 0;
+  system.economyReport = { growthAmount: 0, happiness: 0 };
+  context.applyColonyGrowth(system);
+  eq(system.population, 10, "zero happiness means zero growth");
+  eq(system.growthProgress, 0, "no progress is banked without growth");
+
+  system.population = 10.9;
+  eq(context.getColonyPopulation(system), 10, "population is read as a whole number");
+  eq(context.getPopulationGrowthForHappiness(-5, 100), 0, "negative population never grows");
+}
+
+function testMaintenancePolicy() {
+  const system = context.testSystem({ id: "policy", population: 5 });
+  system.maintenance = undefined;
+  let policy = context.getColonyMaintenancePolicy(system);
+  eq(policy.energy, 100, "the default energy maintenance is 100%");
+  eq(policy.minerals, 100, "the default housing investment is 100%");
+
+  system.maintenance = { energy: 250, minerals: -10 };
+  policy = context.getColonyMaintenancePolicy(system);
+  eq(policy.energy, 100, "percentages are clamped to 100");
+  eq(policy.minerals, 0, "percentages are clamped to 0");
+
+  system.maintenance = { energy: 100, minerals: 100 };
+  eq(context.getColonyMaintenanceChangeReason(system, "energy", 1),
+    "At the maximum 100% maintenance.", "the plus stepper stops at 100");
+  system.maintenance = { energy: 0, minerals: 100 };
+  eq(context.getColonyMaintenanceChangeReason(system, "energy", -1),
+    "Already at 0% maintenance.", "the minus stepper stops at 0");
+  eq(context.getColonyMaintenanceChangeReason(system, "nonsense", 1),
+    "Unknown maintenance axis.", "an unknown axis is refused");
+
+  system.maintenance = { energy: 100, minerals: 100 };
+  const lower = context.adjustColonyMaintenance(system, "energy", -1);
+  eq(lower.ok, true, "a normal step is allowed");
+  eq(system.maintenance.energy, 90, "the step is 10%");
+  eq(context.adjustColonyMaintenance(system, "minerals", -1).ok, true, "housing can step down too");
+  eq(system.maintenance.minerals, 90, "the mineral policy is independent");
+
+  reset();
+  const actionSystem = context.testSystem({ id: "action-policy", population: 5 });
+  actionSystem.maintenance = { energy: 100, minerals: 100 };
+  context.useSystems([actionSystem]);
+  run("state.phase = 'actions';");
+  eq(context.adjustPopulationUpkeep("action-policy", "energy", -1), true,
+    "the UI's energy stepper succeeds");
+  eq(actionSystem.maintenance.energy, 90, "energy maintenance falls by 10%");
+  eq(context.adjustPopulationUpkeep("action-policy", "housing", -1), true,
+    "the legacy housing axis is an alias for minerals");
+  eq(actionSystem.maintenance.minerals, 90, "housing investment falls by 10%");
+  eq(context.adjustPopulationUpkeep("action-policy", "sustenance", -1), true,
+    "the legacy sustenance axis is an alias for energy");
+  eq(actionSystem.maintenance.energy, 80, "energy maintenance falls again");
+}
+
+function testSectorAllocation() {
+  reset();
+  const a = context.testSystem({ id: "alloc-a", population: 10 });
+  const b = context.testSystem({ id: "alloc-b", population: 5 });
+  context.useSystems([a, b]);
+  run("stock(15, 20)");
+
+  const allocations = context.getSectorColonyAllocations("sec-core");
+  eq(allocations.systems.length, 2, "both colonies are allocated");
+  eq(allocations.energy.available, 15, "the allocation sees the sector energy");
+  near(allocations.energy.requested, Math.pow(10, 1.1) + Math.pow(5, 1.1), 1e-9,
+    "both colonies request their full energy");
+  near(allocations.energy.spent, 15, 1e-9, "the short stock is fully spent");
+  near(allocations.byId["alloc-a"].energySpent / Math.pow(10, 1.1),
+    allocations.byId["alloc-b"].energySpent / Math.pow(5, 1.1), 1e-9,
+    "scarce energy is shared proportionally");
+  near(allocations.byId["alloc-a"].energyFulfillment, 15 / (Math.pow(10, 1.1) + Math.pow(5, 1.1)), 1e-9,
+    "the fulfillment ratio is the same for both colonies");
+  eq(allocations.minerals.spent > 0, true, "the sector spends its mineral stock too");
+  eq(run("getSectorStock('sec-core', 'energy')"), 15,
+    "building the allocation does not mutate the ledger");
+
+  const resolved = context.resolvePopulationMaintenance();
+  eq(resolved.colonies, 2, "the turn summary counts both colonies");
+  near(run("getSectorStock('sec-core', 'energy')"), 0, 1e-9, "energy is paid up to the stock");
+  near(run("getSectorStock('sec-core', 'minerals')"), 20 - allocations.minerals.spent, 1e-9,
+    "housing is paid from the same ledger");
+  ok(run("getSectorStock('sec-core', 'energy') >= 0"), "the energy ledger never goes negative");
+  ok(run("getSectorStock('sec-core', 'minerals') >= 0"), "the mineral ledger never goes negative");
+  ok(!!a.economyReport, "the resolved report is stored on the colony");
+  eq(a.economyReport.resolvedTurn, 1, "the report records the turn it was resolved on");
+}
+
+function testSectorEconomyAndUpkeep() {
+  reset();
+  const system = context.testSystem({ id: "ledger", population: 10 });
+  context.useSystems([system]);
+  run("stock(100, 100)");
 
   const sectorEcon = context.getSectorEconomy("sec-core");
-  eq(sectorEcon.upkeep, 2, "colony overhead + 1 sustenance energy = 2 energy upkeep");
-  eq(sectorEcon.populationUpkeepEnergy, 1, "the sector carries the sustenance draw");
-  eq(sectorEcon.mineralUpkeep, 4, "the housing draw is the sector's mineral upkeep");
-  eq(sectorEcon.net.energy, -2, "the ledger shows the energy bill");
-  eq(sectorEcon.net.minerals, -4, "the ledger subtracts the housing bill");
+  near(sectorEcon.populationUpkeepEnergy, Math.pow(10, 1.1), 1e-9,
+    "the sector ledger carries the population energy request");
+  near(sectorEcon.populationUpkeepMinerals, Math.pow(10, 1 / 0.9), 1e-9,
+    "the sector ledger carries the housing request");
+  eq(sectorEcon.infrastructureUpkeep, 1, "colony overhead is infrastructure upkeep");
+  near(sectorEcon.upkeep, 1 + Math.pow(10, 1.1), 1e-9,
+    "total energy upkeep is infrastructure plus population");
+  near(sectorEcon.net.energy, -(1 + Math.pow(10, 1.1)), 0.05,
+    "the projected net subtracts both bills");
+  near(sectorEcon.net.minerals, -Math.pow(10, 1 / 0.9), 0.05,
+    "the projected net subtracts housing");
 
+  context.resolvePopulationMaintenance();
   const report = context.paySectorUpkeep();
-  eq(run("getSectorStock('sec-core','energy')"), 8, "upkeep subtracts the sustenance energy");
-  eq(run("getSectorStock('sec-core','minerals')"), 6, "upkeep subtracts the housing minerals");
-  eq(report.deficit, false, "the sector could pay in full");
-  eq(report.paid["sec-core"].energy, 2, "the report carries the energy paid");
-  eq(report.paid["sec-core"].minerals, 4, "the report carries the minerals paid");
+  eq(report.deficit, false, "infrastructure could be paid in full");
+  near(run("getSectorStock('sec-core', 'energy')"), 100 - Math.pow(10, 1.1) - 1, 1e-9,
+    "population energy is paid first, then colony overhead");
+  near(run("getSectorStock('sec-core', 'minerals')"), 100 - Math.pow(10, 1 / 0.9), 1e-9,
+    "housing is paid from the mineral ledger");
 
-  context.growPopulations();
-  eq(system.population, 2, "one 0.5 growth tick is banked, not rounded up");
-  near(system.growthProgress, 0.5, 1e-9, "the growth tick is fractional");
-  context.growPopulations();
-  eq(system.population, 3, "the second tick completes the population");
-
-  run("setSectorStock('sec-core','minerals',1)");
-  const shortReport = context.paySectorUpkeep();
-  eq(run("getSectorStock('sec-core','minerals')"), -3, "an unpaid housing bill runs a mineral deficit");
-  eq(shortReport.deficit, true, "the report flags the mineral deficit");
+  run("stock(0.5, 0)");
+  context.resolvePopulationMaintenance();
+  const short = context.paySectorUpkeep();
+  eq(short.deficit, true, "a sector that cannot pay infrastructure is in deficit");
+  eq(run("getSectorStock('sec-core', 'energy')"), 0, "the energy ledger stops at zero");
+  eq(run("getSectorStock('sec-core', 'minerals')"), 0, "the mineral ledger stops at zero");
+  eq(short.paid["sec-core"].shortfallEnergy, 1, "the shortfall is reported");
   ok(context.getSectorsInDeficit().some(function (sector) { return sector.id === "sec-core"; }),
-    "the stability sheet lists the sector in deficit");
+    "the stability sheet lists the sector");
+
+  run("setSectorStock('sec-core', 'minerals', 5); addSectorStock('sec-core', 'minerals', -50);");
+  eq(run("getSectorStock('sec-core', 'minerals')"), 0, "no ledger path can go negative");
 }
 
 function testIncomeCarry() {
@@ -561,27 +757,38 @@ function testColonization() {
   run("setSectorStock(" + JSON.stringify(target.sectorId) + ", 'minerals', 20); state.resources.influence = 10;");
   context.colonizeSystem(target.id);
   const system = context.getSystem(target.id);
+  const startingColony = run("getEconomyConfig().startingPopulation.colony");
   eq(system.colonized, true, "colonisation marks the system colonised");
   eq(system.unlockedBonusSlots, 0, "a new colony starts with every bonus slot locked");
   eq(system.growthProgress, 0, "a new colony starts with no growth carry");
-  eq(system.population, 1, "a new colony starts with one population");
-  eq(system.populationUpkeep.housing, 0, "a new colony has no housing upkeep yet");
-  eq(system.populationUpkeep.sustenance, 0, "a new colony has no sustenance upkeep yet");
-  eq(context.getWorkforcePlan(system).cap, 1, "its founding shelter holds exactly one person");
-  eq(system.slots.length, context.getTotalSlots(system), "the colony slot array matches the planet size plus bonus slots");
+  eq(system.population, startingColony, "a new colony starts at the configured population");
+  eq(system.workerStrategy, "roundRobin", "a new colony starts on round robin");
+  eq(system.maintenance.energy, 100, "a new colony starts with full energy maintenance");
+  eq(system.maintenance.minerals, 100, "a new colony starts with full housing investment");
+  eq(Object.keys(system.workerOrders).length, 0, "a new colony starts on automatic crew order");
+  eq(context.getWorkforcePlan(system).jobsTotal, 0, "a new colony has no worker posts yet");
+  eq(context.getWorkforcePlan(system).availableWorkers, startingColony,
+    "every colonist is free at founding");
+  eq(system.slots.length, context.getTotalSlots(system),
+    "the colony slot array matches the planet size plus bonus slots");
   ok(system.slots.every(function (slot) { return slot === null; }), "a new colony has no buildings");
 }
 
 function main() {
   testPlanetSizeRolls();
+  testStartingColony();
   testSlotModel();
   testSlotUnlocking();
-  testWorkforceAndUpkeep();
-  testPopulationHousing();
-  testPopulationSustenance();
-  testPopulationGrowth();
-  testPopulationActions();
-  testPopulationUpkeepPayment();
+  testFacilityLevels();
+  testWorkforceAndProduction();
+  testPinnedCrews();
+  testWorkerStrategies();
+  testFormulas();
+  testColonyReports();
+  testGrowth();
+  testMaintenancePolicy();
+  testSectorAllocation();
+  testSectorEconomyAndUpkeep();
   testIncomeCarry();
   testColonization();
   console.log("colony harness: " + checks + " checks passed");

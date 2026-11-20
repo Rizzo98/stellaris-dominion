@@ -10,7 +10,9 @@
    ============================================================ */
 
 const SAVE_FORMAT = "stellar-dominion-save";
-const SAVE_VERSION = 1;
+/* v2: population maintenance is a percentage policy and colonies carry
+   explicit worker orders. v1 saves cannot be read by this build. */
+const SAVE_VERSION = 2;
 const SAVE_STORAGE_KEY = "stellar-dominion-mvp3-save";
 
 function isSaveablePhase(phase) {
@@ -146,13 +148,44 @@ function normalizeSavedSector(sector) {
 }
 
 function normalizeSavedSystem(system) {
+  const economy = getEconomyConfig();
   system.colonized = !!system.colonized;
-  system.population = typeof system.population === "number" ? system.population : 0;
-  system.populationUpkeep = Object.assign({ housing: 0, sustenance: 0 }, system.populationUpkeep || {});
-  system.growthProgress = typeof system.growthProgress === "number" ? system.growthProgress : 0;
+  system.population = typeof system.population === "number" && isFinite(system.population)
+    ? Math.max(0, Math.floor(system.population))
+    : 0;
+  /* v2 maintenance policy: percentages of the full energy/housing
+     requirement. Older saves carried a populationUpkeep object; that shape is
+     not readable by this format version, so this is only a defensive default
+     for hand-built fixtures. */
+  system.maintenance = Object.assign({
+    energy: economy.defaultEnergyPercent,
+    minerals: economy.defaultMineralsPercent
+  }, system.maintenance || {});
+  system.maintenance.energy = clamp(Math.round(system.maintenance.energy), economy.minPercent, economy.maxPercent);
+  system.maintenance.minerals = clamp(Math.round(system.maintenance.minerals), economy.minPercent, economy.maxPercent);
+  const strategyIds = (economy.workerStrategies || []).map(function (entry) { return entry.id; });
+  system.workerStrategy = strategyIds.indexOf(system.workerStrategy) !== -1
+    ? system.workerStrategy
+    : economy.defaultWorkerStrategy;
+  if (!system.workerOrders || typeof system.workerOrders !== "object" || Array.isArray(system.workerOrders)) {
+    system.workerOrders = {};
+  }
+  Object.keys(system.workerOrders).forEach(function (key) {
+    const value = Number(system.workerOrders[key]);
+    if (!isFinite(value) || value < 0) {
+      delete system.workerOrders[key];
+    } else {
+      system.workerOrders[key] = Math.floor(value);
+    }
+  });
+  if (system.economyReport && typeof system.economyReport !== "object") system.economyReport = null;
+  system.growthProgress = typeof system.growthProgress === "number" && isFinite(system.growthProgress)
+    ? clamp(system.growthProgress, 0, 0.999999999)
+    : 0;
   system.unlockedBonusSlots = typeof system.unlockedBonusSlots === "number" ? system.unlockedBonusSlots : 0;
   system.completedNow = !!system.completedNow;
   if (!Array.isArray(system.slots)) system.slots = createPlanetSlots(system);
+  delete system.populationUpkeep;
 }
 
 /* Defaults cover a save made before a field existed. The values are chosen

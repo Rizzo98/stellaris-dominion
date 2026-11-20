@@ -37,6 +37,7 @@ const files = [
   "js/core/state.js",
   "js/core/helpers.js",
   "js/core/colony.js",
+  "js/core/colony-economy.js",
   "js/core/hex-grid.js",
   "js/core/empires.js",
   "js/core/combat.js",
@@ -325,10 +326,10 @@ function testCatalogue() {
 function testBuildingLevels() {
   run("freshTech()");
   eq(run("getBuildingMaxLevel('mine')"), 4, "a building caps at level 4");
-  eq(run("getBuildingOutput('mine', 1).minerals"), 3, "a level 1 mine yields 3 minerals");
-  eq(run("getBuildingOutput('mine', 2).minerals"), 4, "a level 2 mine yields 4 minerals");
-  eq(run("getBuildingOutput('mine', 4).minerals"), 6, "a level 4 mine follows the per-level table");
-  eq(run("getBuildingOutput('power', 2).energy"), 5, "a level 2 power plant yields 5 energy");
+  eq(run("getBuildingOutput('mine', 1).minerals"), 8, "a level 1 mine yields 8 minerals");
+  eq(run("getBuildingOutput('mine', 2).minerals"), 16, "a level 2 mine yields 16 minerals");
+  eq(run("getBuildingOutput('mine', 4).minerals"), 64, "a level 4 mine follows the shared facility table");
+  eq(run("getBuildingOutput('power', 2).energy"), 16, "a level 2 power plant yields 16 energy");
   eq(run("getBuildingOutput('lab', 3).research"), 4, "a level 3 lab yields 4 research");
   eq(run("getBuildingOutput('embassy', 4).influence"), 5, "a level 4 embassy yields 5 influence");
   eq(run("getBuildingUpgradeCost('mine').minerals"), 3, "a 5 mineral mine refits for half its value, rounded up");
@@ -338,6 +339,7 @@ function testBuildingLevels() {
 
   run("setSectorStock('sec-core', 'minerals', 60)");
   const systemId = run("homeSystem().id");
+  run("homeSystem().slots = createPlanetSlots(homeSystem()); homeSystem().population = 12");
   run("buildInSlot(" + JSON.stringify(systemId) + ", 0, 'mine')");
   run("finishConstruction()");
   eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 1,
@@ -349,7 +351,7 @@ function testBuildingLevels() {
   eq(run("getBuildingUnlockedLevel('mine')"), 2, "the tech unlocks level 2");
   eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 1,
     "a completed tech does not upgrade a standing building");
-  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 3,
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 8,
     "the standing mine keeps its level 1 yield after the tech");
 
   const before = run("getSectorStock('sec-core', 'minerals')");
@@ -357,8 +359,13 @@ function testBuildingLevels() {
   eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 2,
     "the building is refitted to level 2");
   eq(run("getSectorStock('sec-core', 'minerals')"), before - 3, "the refit costs half the build cost");
-  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 4,
-    "the refitted mine now yields 4 minerals");
+  eq(run("getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")).entries[0].eligible"), false,
+    "a level 2 facility is blocked below its 15 population gate");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 0,
+    "a blocked facility produces nothing");
+  run("homeSystem().population = 20");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 16,
+    "once the colony reaches the gate the refitted mine yields 16 minerals");
 
   /* No further level is unlocked yet. */
   const level = run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])");
@@ -371,8 +378,8 @@ function testBuildingLevels() {
   eq(run("getBuildingUnlockedLevel('mine')"), 3, "the second tech unlocks level 3");
   run("setSectorStock('sec-core', 'minerals', 60)");
   ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"));
-  eq(run("getBuildingOutput(getSystem(" + JSON.stringify(systemId) + ").slots[0].type, 3).minerals"), 5,
-    "level 3 produces 5 minerals");
+  eq(run("getBuildingOutput(getSystem(" + JSON.stringify(systemId) + ").slots[0].type, 3).minerals"), 32,
+    "level 3 produces 32 minerals");
 
   /* A refit with an empty ledger is refused. */
   run("grantTech('mineTech3')");
@@ -714,6 +721,7 @@ function testColonyRefitUI() {
   run("freshTech()");
   run("setSectorStock('sec-core', 'minerals', 60)");
   const systemId = run("homeSystem().id");
+  run("homeSystem().slots = createPlanetSlots(homeSystem()); homeSystem().population = 12");
   run("buildInSlot(" + JSON.stringify(systemId) + ", 0, 'mine')");
   run("finishConstruction()");
   let tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");

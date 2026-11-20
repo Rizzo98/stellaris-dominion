@@ -1,16 +1,19 @@
 /* ============================================================
    CONFIG — balance knobs for the whole run
-   Starting stockpiles, base yields, colonisation/build costs, population
-   housing/sustenance/growth, stability bands, the galaxy/sector layout,
-   military rules and rival empire spawn/raid settings.
+   Starting stockpiles, base yields, colonisation/build costs, the colony
+   economy (maintenance formulas, facility levels and population growth),
+   stability bands, the galaxy/sector layout, military rules and rival
+   empire spawn/raid settings.
    ============================================================ */
 
 const CONFIG = {
   /* Energy and minerals are stockpiled per sector; research and influence
      are empire-wide. startingResources seeds the home sector's energy and
-     minerals plus the empire's research and influence. */
-  startingResources: { energy: 10, minerals: 10, research: 0, influence: 5 },
-  baseIncome: { energy: 2, minerals: 2, research: 0, influence: 1 },
+     minerals plus the empire's research and influence. The capital also
+     keeps a small baseline yield, and its two starter facilities are already
+     online, so a brand-new run can pay its first maintenance bill. */
+  startingResources: { energy: 15, minerals: 15, research: 0, influence: 5 },
+  baseIncome: { energy: 4, minerals: 4, research: 0, influence: 1 },
   stability: {
     start: 70,
     lowThreshold: 30,
@@ -74,37 +77,82 @@ const CONFIG = {
     },
     unlockCost: { energy: 5, minerals: 8 }
   },
-  /* Population is no longer housed by buildings. Every colony owns a founding
-     shelter and the player funds the rest with two standing upkeeps:
-       - housing: a mineral upkeep per turn. Every mineralsPerHouse minerals
-         adds one house, up to the planet's size in extra houses. Houses are
-         the hard population cap.
-       - sustenance: an energy upkeep per turn. Each energy feeds
-         populationPerEnergy people; feeding everyone gives full growth, a
-         surplus can raise it to maxMult and a shortage slows it down.
-     Both upkeeps are paid from the colony sector's ledger every turn.
-     Growth saturates: a colony gains
-     growthRate * sustenance * (1 - population / housing) per turn, so it
-     starts fast and slows as the houses fill. Fractions carry between turns. */
-  population: {
-    homeStart: 3,
-    colonyStart: 1,
-    homeBaseCap: 3,
-    colonyBaseCap: 1,
-    growthRate: 1.5,
-    housing: {
-      mineralsPerHouse: 2
+  /* ---------- colony economy ----------
+     Every colony owns three connected numbers: population (P), energy and
+     minerals. The formulas below are intentionally the only place the
+     balance lives; core/colony-economy.js reads them.
+
+       E_required = P ^ energyExponent
+       H          = M_spent ^ housingExponent
+       H_deficit  = max(0, P - H)
+       h          = H_deficit / P
+       G          = E_spent / E_required
+       F          = happinessMax * min(1, G) * max(0, 1 - h)
+       growth     = P * baseGrowthRate * (F / happinessMax)
+
+     Maintenance is requested as a percentage of the full requirement. The
+     colony attempts that share every turn; the sector ledger caps the actual
+     spend, so an under-funded colony loses energy/housing fulfillment
+     instead of running a negative balance. The sector's other upkeep is paid
+     after population maintenance.
+
+     A new colony starts at startingPopulation.colony (enough to operate a
+     level-1 facility). The capital starts at startingPopulation.home and
+     opens with startingFacilities already built, in slot order. Those are
+     ordinary level-1 buildings: they still need a crew and the level-1
+     population gate. All of it is part of the same central balance block. */
+  economy: {
+    startingPopulation: { home: 3, colony: 5 },
+    /* Built on the capital before the first turn, in slot order. With the
+       default round-robin auto strategy the opening 3 workers split 2/1
+       across the Power Plant and Mine. */
+    startingFacilities: [
+      { type: "power", level: 1 },
+      { type: "mine", level: 1 }
+    ],
+    population: {
+      baseGrowthRate: 0.05,
+      energyExponent: 1.1,
+      housingExponent: 0.9,
+      happinessMax: 100
     },
-    sustenance: {
-      populationPerEnergy: 2,
-      maxMult: 1.25,
-      /* Highest threshold first: getSustenanceTier() takes the first match. */
-      tiers: [
-        { id: "thriving", label: "THRIVING", min: 1.25 },
-        { id: "content", label: "CONTENT", min: 1 },
-        { id: "frugal", label: "FRUGAL", min: 0.5 },
-        { id: "malnourished", label: "MALNOURISHED", min: 0.01 },
-        { id: "starving", label: "STARVING", min: 0 }
+    /* UI copy only: the formula produces the number, the tier names it. */
+    happinessTiers: [
+      { id: "flourishing", label: "FLOURISHING", min: 90 },
+      { id: "content", label: "CONTENT", min: 70 },
+      { id: "strained", label: "STRAINED", min: 40 },
+      { id: "unhappy", label: "UNHAPPY", min: 10 },
+      { id: "miserable", label: "MISERABLE", min: 0 }
+    ],
+    maintenance: {
+      minPercent: 0,
+      maxPercent: 100,
+      stepPercent: 10,
+      defaultEnergyPercent: 100,
+      defaultMineralsPercent: 100
+    },
+    /* Automatic workforce distribution. Round robin hands one worker to
+       each eligible facility in turn, so 3 people across two 4-worker
+       facilities split 2/1. Greedy fills the earliest facility slots first,
+       giving 3/0 in the same colony. Explicit orders still win; clearing
+       them returns the colony to the selected strategy. */
+    workforce: {
+      defaultStrategy: "roundRobin",
+      strategies: [
+        { id: "roundRobin", label: "ROUND ROBIN", description: "Share workers across every eligible facility, one at a time." },
+        { id: "greedy", label: "GREEDY", description: "Fill the earliest facility slots first." }
+      ]
+    },
+    /* Shared by Power Plants and Mines. Level 1 output 8 for 4 workers and a
+       minimum colony population of 3, which is the capital's opening size.
+       A facility cannot operate below its minimum population; partial
+       crews still scale output. */
+    facilities: {
+      levels: [
+        { level: 1, name: "Primitive", minPopulation: 3, workers: 4, output: 8 },
+        { level: 2, name: "Industrial", minPopulation: 15, workers: 6, output: 16 },
+        { level: 3, name: "Advanced", minPopulation: 40, workers: 9, output: 32 },
+        { level: 4, name: "Megastructural", minPopulation: 100, workers: 14, output: 64 }
       ]
     }
   },
