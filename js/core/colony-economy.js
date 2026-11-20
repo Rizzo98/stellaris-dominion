@@ -67,7 +67,8 @@ function getEconomyConfig() {
     housingExponent: numberOr(population.housingExponent, 0.9),
     happinessMax: Math.max(1, numberOr(population.happinessMax, 100)),
     minPercent: numberOr(maintenance.minPercent, 0),
-    maxPercent: numberOr(maintenance.maxPercent, 100),
+    maxPercent: Math.max(100, numberOr(maintenance.maxPercent, 200)),
+    maxGrowthMultiplier: Math.max(1, numberOr(maintenance.growthMultiplierMax, 2)),
     stepPercent: Math.max(1, numberOr(maintenance.stepPercent, 10)),
     defaultEnergyPercent: numberOr(maintenance.defaultEnergyPercent, 100),
     defaultMineralsPercent: numberOr(maintenance.defaultMineralsPercent, 100),
@@ -203,6 +204,29 @@ function getPopulationGrowthForHappiness(population, happiness) {
    getSectorColonyAllocations() the spent figures are the sector's final
    answer; without one the colony is measured against the sector's current
    stock on its own, which is useful for the colony screen and for tests. */
+/* Extra maintenance above 100% does not raise happiness (that is capped at
+   100), but it accelerates growth. Each axis contributes up to the same
+   surplus at the maintenance cap; 200% on both lines reaches
+   growthMultiplierMax. The percentages are based on what was actually spent,
+   so a sector that cannot fund the request does not get the bonus. */
+function getMaintenanceGrowthMultiplier(energySpent, mineralsSpent, population) {
+  const cfg = getEconomyConfig();
+  const p = Math.max(0, Number(population) || 0);
+  const maxBonus = cfg.maxGrowthMultiplier - 1;
+  const maxOverPerAxis = Math.max(0, cfg.maxPercent / 100 - 1);
+  if (p <= 0 || maxBonus <= 0 || maxOverPerAxis <= 0) return 1;
+  const energyRequired = getPopulationEnergyRequirement(p);
+  const mineralsRequired = getRequiredHousingMinerals(p);
+  const overEnergy = energyRequired > 0
+    ? Math.max(0, Math.max(0, energySpent) / energyRequired - 1)
+    : 0;
+  const overHousing = mineralsRequired > 0
+    ? Math.max(0, Math.max(0, mineralsSpent) / mineralsRequired - 1)
+    : 0;
+  const maxOver = maxOverPerAxis * 2;
+  return clamp(1 + ((overEnergy + overHousing) / maxOver) * maxBonus, 1, cfg.maxGrowthMultiplier);
+}
+
 function getColonyEconomy(system, allocation) {
   const population = getColonyPopulation(system);
   const workforce = getWorkforcePlan(system);
@@ -220,8 +244,12 @@ function getColonyEconomy(system, allocation) {
   mineralsSpent = clamp(mineralsSpent, 0, request.mineralsRequested);
 
   const happiness = getColonyHappiness(energySpent, mineralsSpent, population);
-  const growthAmount = getPopulationGrowthForHappiness(population, happiness.happiness);
+  const baseGrowthAmount = getPopulationGrowthForHappiness(population, happiness.happiness);
+  const growthMultiplier = getMaintenanceGrowthMultiplier(energySpent, mineralsSpent, population);
+  const growthAmount = baseGrowthAmount * growthMultiplier;
   const growthProgress = clamp(typeof system.growthProgress === "number" ? system.growthProgress : 0, 0, 0.999999999);
+  const energyFunding = request.energyRequired > 0 ? (energySpent / request.energyRequired) * 100 : 0;
+  const mineralsFunding = request.mineralsRequired > 0 ? (mineralsSpent / request.mineralsRequired) * 100 : 0;
   const turnsToNextPop = growthAmount > 0
     ? Math.max(1, Math.ceil((1 - growthProgress) / growthAmount))
     : null;
@@ -256,7 +284,11 @@ function getColonyEconomy(system, allocation) {
     normalizedHousingDeficit: happiness.normalizedHousingDeficit,
     happiness: happiness.happiness,
     tier: happiness.tier,
+    baseGrowthAmount: baseGrowthAmount,
     growthAmount: growthAmount,
+    growthMultiplier: growthMultiplier,
+    energyFunding: energyFunding,
+    mineralsFunding: mineralsFunding,
     growthProgress: growthProgress,
     turnsToNextPop: turnsToNextPop,
     canGrow: growthAmount > 0,

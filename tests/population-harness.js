@@ -302,6 +302,7 @@ function testLowPopulationGrowthCopy() {
   system.population = 3;
   eq(context.formatGrowthAmount(0.15), "0.15", "growth keeps two decimals at three population");
   eq(context.formatGrowthAmount(0.6), "0.6", "larger growth still trims trailing zeros");
+  eq(context.formatGrowthAmount(0.165), "0.16", "the readout rounds down rather than overstating growth");
   const planet = context.getPlanetBreakdown(system);
   eq(context.formatGrowthAmount(planet.populationMaintenance.growthAmount), "0.15",
     "the three-person colony grows by 0.15");
@@ -315,6 +316,35 @@ function testLowPopulationGrowthCopy() {
 }
 
 /* ---------- population / maintenance menu ---------- */
+
+function testOverfundedGrowth() {
+  const system = reset();
+  system.population = 3;
+  system.maintenance = { energy: 200, minerals: 200 };
+  const planet = context.getPlanetBreakdown(system);
+  eq(planet.populationMaintenance.growthMultiplier, 2, "200% on both lines doubles growth");
+  eq(context.formatGrowthAmount(planet.populationMaintenance.growthAmount), "0.3",
+    "three people grow by 0.30 per turn at 2x");
+  eq(planet.populationMaintenance.turnsToNextPop, 4, "0.30 per turn reaches a person in four turns");
+  let card = context.populationCardHTML(system, planet);
+  includes(card, "+0.3 / TURN", "the card shows the accelerated rate");
+  includes(card, "Next population in 4 turns", "the card's turn count is accelerated too");
+  includes(card, "×2.00 GROWTH", "the card shows the surplus multiplier chip");
+  includes(card, "Maintenance surplus ×2.00", "the card explains the surplus multiplier");
+  let sheet = context.populationSheetHTML(system);
+  includes(sheet, "200%", "the maintenance row shows the raised cap");
+  includes(sheet, "Maintenance growth multiplier", "the sheet has a growth multiplier row");
+  includes(sheet, "×2.00", "the sheet reports the 2x multiplier");
+  includes(sheet, "+0.3 / turn", "the sheet reports the accelerated growth");
+  includes(sheet, "4 turns", "the sheet reports the shorter forecast");
+
+  system.maintenance = { energy: 200, minerals: 100 };
+  const oneLine = context.getPlanetBreakdown(system);
+  eq(Math.round(oneLine.populationMaintenance.growthMultiplier * 100) / 100, 1.5,
+    "one overfunded line is a 1.5x bonus");
+  includes(context.populationCardHTML(system, oneLine), "×1.50 GROWTH", "the card shows the one-line bonus");
+  includes(context.populationSheetHTML(system), "×1.50", "the sheet shows the one-line bonus");
+}
 
 function testPopulationSheet() {
   const system = reset();
@@ -381,11 +411,17 @@ function testPopulationSheetActions() {
   includes(context.populationSheetHTML(system), "Already at 0% maintenance.", "the zero bound is explained");
 
   run("setMaintenance(state.systems.find(function (s) { return s.home; }), 100, 100)");
+  excludes(context.populationSheetHTML(system), 'data-pop-upkeep="energy:1" disabled',
+    "the energy stepper can cross 100%");
+  excludes(context.populationSheetHTML(system), 'data-pop-upkeep="minerals:1" disabled',
+    "the housing stepper can cross 100%");
+
+  run("setMaintenance(state.systems.find(function (s) { return s.home; }), 200, 200)");
   includes(context.populationSheetHTML(system), 'data-pop-upkeep="energy:1" disabled',
-    "the energy stepper stops at 100%");
+    "the energy stepper stops at 200%");
   includes(context.populationSheetHTML(system), 'data-pop-upkeep="minerals:1" disabled',
-    "the housing stepper stops at 100%");
-  includes(context.populationSheetHTML(system), "At the maximum 100% maintenance.", "the gold bound is explained");
+    "the housing stepper stops at 200%");
+  includes(context.populationSheetHTML(system), "At the maximum 200% maintenance.", "the gold bound is explained");
 }
 
 function testWorkerStrategyControls() {
@@ -542,6 +578,7 @@ function testRemovedModel() {
 function main() {
   testPopulationCard();
   testLowPopulationGrowthCopy();
+  testOverfundedGrowth();
   testPopulationSheet();
   testPopulationSheetActions();
   testWorkerStrategyControls();

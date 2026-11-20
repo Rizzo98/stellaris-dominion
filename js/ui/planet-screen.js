@@ -257,6 +257,9 @@ function populationCardHTML(system, planet) {
     note = "Next population in " + report.turnsToNextPop +
       (report.turnsToNextPop === 1 ? " turn." : " turns.") +
       " Happiness " + happiness + "% · energy " + energyPercent + "% · housing " + housingPercent + "%.";
+    if (report.growthMultiplier > 1.001) {
+      note += " Maintenance surplus ×" + report.growthMultiplier.toFixed(2) + ".";
+    }
   } else if (report.growthBlockedBy === "unfunded") {
     growthText = "UNFUNDED";
     note = "The colony has no energy and is short on housing. Open the population menu and fund both maintenance lines.";
@@ -301,6 +304,9 @@ function populationCardHTML(system, planet) {
           formatAmount(Math.min(report.housingCapacity, report.population)) + ' / ' + report.population + ' HOUSED</span>' +
         '<span class="population-chip' + happyClass + '">😊 ' + happiness + '% ' + tier.label + '</span>' +
         '<span class="population-chip' + growthClass + '">📈 ' + growthText + '</span>' +
+        (report.growthMultiplier > 1.001
+          ? '<span class="population-chip good">×' + report.growthMultiplier.toFixed(2) + ' GROWTH</span>'
+          : "") +
         (wf.blockedBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.blockedBuildings + ' BLOCKED</span>' : "") +
         (wf.idleBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.idleBuildings + ' IDLE</span>' : "") +
         (wf.partialBuildings > 0 ? '<span class="population-chip warn">⚠ ' + wf.partialBuildings + ' PARTIAL</span>' : "") +

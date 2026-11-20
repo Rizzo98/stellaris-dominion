@@ -18,9 +18,10 @@ function formatAmount(value) {
 
 /* Population growth is small at low population (3 × 5% = 0.15), so the
    normal one-decimal formatter would round 0.15 up to 0.2 and make the
-   'next population' turn count look wrong. Growth keeps two decimals. */
+   'next population' turn count look wrong. Growth keeps two decimals and
+   rounds down, so the displayed rate never overstates the real one. */
 function formatGrowthAmount(value) {
-  const rounded = Math.round((Number(value) || 0) * 100) / 100;
+  const rounded = Math.floor((Number(value) || 0) * 100 + 1e-9) / 100;
   if (rounded === 0) return "0";
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0$/, "");
 }

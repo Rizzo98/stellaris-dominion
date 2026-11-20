@@ -544,6 +544,42 @@ function testFormulas() {
   eq(context.getPopulationGrowthForHappiness(10, 0), 0, "0% happiness means no growth");
 }
 
+function testGrowthMultiplier() {
+  const cfg = context.getEconomyConfig();
+  eq(cfg.maxPercent, 200, "maintenance can reach 200%");
+  eq(cfg.maxGrowthMultiplier, 2, "the growth bonus caps at 2x");
+  const p = 3;
+  const e = context.getPopulationEnergyRequirement(p);
+  const m = context.getRequiredHousingMinerals(p);
+  near(context.getMaintenanceGrowthMultiplier(e, m, p), 1, 1e-9,
+    "100% on both lines is the normal rate");
+  near(context.getMaintenanceGrowthMultiplier(e * 2, m * 2, p), 2, 1e-9,
+    "200% on both lines doubles growth");
+  near(context.getMaintenanceGrowthMultiplier(e * 2, m, p), 1.5, 1e-9,
+    "200% energy and 100% housing is 1.5x");
+  near(context.getMaintenanceGrowthMultiplier(e, m * 2, p), 1.5, 1e-9,
+    "200% housing and 100% energy is 1.5x");
+  near(context.getMaintenanceGrowthMultiplier(e * 1.5, m * 1.5, p), 1.5, 1e-9,
+    "150% on both lines is 1.5x");
+  near(context.getMaintenanceGrowthMultiplier(0, 0, p), 1, 1e-9,
+    "no maintenance never earns a bonus");
+
+  const system = context.testSystem({ id: "growth-bonus", population: 3, maintenance: { energy: 200, minerals: 200 } });
+  context.useSystems([system]);
+  run("stock(100, 100)");
+  let report = context.getColonyEconomy(system);
+  near(report.baseGrowthAmount, 0.15, 1e-9, "base growth at three people is 0.15");
+  near(report.growthMultiplier, 2, 1e-9, "the report carries the 2x multiplier");
+  near(report.growthAmount, 0.30, 1e-9, "the final growth is doubled");
+  eq(report.turnsToNextPop, 4, "0.30 per turn reaches a person in four turns");
+  near(report.energyFunding, 200, 1e-9, "energy funding is the spent share");
+  near(report.mineralsFunding, 200, 1e-9, "housing funding is the spent share");
+
+  run("stock(3, 3)");
+  report = context.getColonyEconomy(system);
+  near(report.growthMultiplier, 1, 1e-9, "a stock-poor colony cannot buy the bonus");
+}
+
 function testColonyReports() {
   reset();
   const system = context.testSystem({
@@ -620,12 +656,15 @@ function testMaintenancePolicy() {
 
   system.maintenance = { energy: 250, minerals: -10 };
   policy = context.getColonyMaintenancePolicy(system);
-  eq(policy.energy, 100, "percentages are clamped to 100");
+  eq(policy.energy, 200, "percentages are clamped to 200");
   eq(policy.minerals, 0, "percentages are clamped to 0");
 
-  system.maintenance = { energy: 100, minerals: 100 };
+  system.maintenance = { energy: 200, minerals: 200 };
   eq(context.getColonyMaintenanceChangeReason(system, "energy", 1),
-    "At the maximum 100% maintenance.", "the plus stepper stops at 100");
+    "At the maximum 200% maintenance.", "the plus stepper stops at 200");
+  system.maintenance = { energy: 100, minerals: 100 };
+  eq(context.getColonyMaintenanceChangeReason(system, "energy", 1), null,
+    "the plus stepper can cross 100");
   system.maintenance = { energy: 0, minerals: 100 };
   eq(context.getColonyMaintenanceChangeReason(system, "energy", -1),
     "Already at 0% maintenance.", "the minus stepper stops at 0");
@@ -784,6 +823,7 @@ function main() {
   testPinnedCrews();
   testWorkerStrategies();
   testFormulas();
+  testGrowthMultiplier();
   testColonyReports();
   testGrowth();
   testMaintenancePolicy();

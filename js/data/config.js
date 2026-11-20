@@ -88,13 +88,18 @@ const CONFIG = {
        h          = H_deficit / P
        G          = E_spent / E_required
        F          = happinessMax * min(1, G) * max(0, 1 - h)
-       growth     = P * baseGrowthRate * (F / happinessMax)
+       overE      = max(0, E_spent / E_required - 1)
+       overH      = max(0, M_spent / M_required - 1)
+       M          = 1 + ((overE + overH) / 2) * (growthMultiplierMax - 1)
+       growth     = P * baseGrowthRate * (F / happinessMax) * M
 
      Maintenance is requested as a percentage of the full requirement. The
-     colony attempts that share every turn; the sector ledger caps the actual
-     spend, so an under-funded colony loses energy/housing fulfillment
-     instead of running a negative balance. The sector's other upkeep is paid
-     after population maintenance.
+     first 100% satisfies happiness; extra energy and housing above 100%
+     do not raise happiness, but add to the growth multiplier M. At 200%
+     on both lines M reaches growthMultiplierMax (2x). The sector ledger
+     caps the actual spend, so an under-funded colony loses fulfillment and
+     growth bonus instead of running a negative balance. The sector's other
+     upkeep is paid after population maintenance.
 
      A new colony starts at startingPopulation.colony (enough to operate a
      level-1 facility). The capital starts at startingPopulation.home and
@@ -126,8 +131,9 @@ const CONFIG = {
     ],
     maintenance: {
       minPercent: 0,
-      maxPercent: 100,
+      maxPercent: 200,
       stepPercent: 10,
+      growthMultiplierMax: 2,
       defaultEnergyPercent: 100,
       defaultMineralsPercent: 100
     },

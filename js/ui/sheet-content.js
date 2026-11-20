@@ -535,8 +535,9 @@ function populationSheetHTML(system) {
   parts.push(maintenanceRow(system, "minerals", report));
   parts.push(
     '<p class="upkeep-status">Maintenance is a share of the full requirement, charged every turn. ' +
-    "The sector ledger caps the actual spend: a colony that cannot pay keeps its stock at zero and loses fulfillment, never " +
-    "falls into a negative balance. " + cfg.stepPercent + "% per press.</p>"
+    "100% satisfies happiness; extra energy and housing up to " + cfg.maxPercent + "% adds a growth multiplier (up to ×" +
+    cfg.maxGrowthMultiplier + " at " + cfg.maxPercent + "% on both lines). The sector ledger caps the actual spend: " +
+    "a colony that cannot pay loses fulfillment and bonus, never falls into a negative balance. " + cfg.stepPercent + "% per press.</p>"
   );
   parts.push("</div>");
 
@@ -559,7 +560,7 @@ function populationSheetHTML(system) {
     amountClass: energyPercent >= 100 ? "text-good" : energyPercent > 0 ? "text-gold" : "text-bad"
   }));
   parts.push(breakdownRow("Fulfillment G = E_spent / E_required", energyPercent + "%", {
-    sub: "Excess supply is capped at 100%",
+    sub: "Happiness caps at 100%; extra supply adds growth",
     amountClass: energyPercent >= 100 ? "text-good" : energyPercent > 0 ? "text-gold" : "text-bad"
   }));
   parts.push("</div>");
@@ -573,7 +574,7 @@ function populationSheetHTML(system) {
     "</div>"
   );
   parts.push(breakdownRow("M_required for H = P", formatEconomic(report.mineralsRequired) + " ⛏", {
-    sub: "P^(1/" + cfg.housingExponent + ") · " + cfg.maxPercent + "% buys full housing",
+    sub: "P^(1/" + cfg.housingExponent + ") · 100% buys full housing; extra adds growth",
     amountClass: "text-faint"
   }));
   parts.push(breakdownRow("H = M_spent^" + cfg.housingExponent, formatEconomic(report.housingCapacity), {
@@ -618,8 +619,13 @@ function populationSheetHTML(system) {
     "+" + formatAmount(report.population * cfg.growthRate) + " / turn", {
       sub: "P × " + (cfg.growthRate * 100).toFixed(0) + "%"
     }));
+  parts.push(breakdownRow("Maintenance growth multiplier", "×" + report.growthMultiplier.toFixed(2), {
+    sub: "Overfunding above 100% · max ×" + cfg.maxGrowthMultiplier,
+    amountClass: report.growthMultiplier > 1.001 ? "text-good" : "text-faint"
+  }));
   parts.push(breakdownRow("Growth at current happiness", growthValue + " / turn", {
-    sub: "P × " + (cfg.growthRate * 100).toFixed(0) + "% × " + (report.happiness / cfg.happinessMax).toFixed(2),
+    sub: "P × " + (cfg.growthRate * 100).toFixed(0) + "% × " + (report.happiness / cfg.happinessMax).toFixed(2) +
+      " × " + report.growthMultiplier.toFixed(2),
     amountClass: growthClass
   }));
   parts.push(breakdownRow("Next population", nextPopText, {
@@ -681,7 +687,7 @@ function populationSheetHTML(system) {
   parts.push(
     '<p class="sheet-note">Energy maintenance and housing investment are standing orders: both are charged to this sector every turn when you end the turn. ' +
     "Happiness is the product of energy fulfillment and housing fulfillment, and growth is population × " +
-    (cfg.growthRate * 100).toFixed(0) + "% × happiness. Population growth is applied after the maintenance bill, so a colony that cannot pay this turn grows more slowly. " +
+    (cfg.growthRate * 100).toFixed(0) + "% × happiness × maintenance multiplier. Population growth is applied after the maintenance bill, so a colony that cannot pay this turn grows more slowly and loses its surplus bonus. " +
     "Facilities need a minimum colony population; automatic crews follow the selected strategy until you pin them with the − / + buttons on the colony screen.</p>"
   );
   return parts.join("");
