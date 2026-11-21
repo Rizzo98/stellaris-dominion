@@ -14,6 +14,19 @@ function bindEvents() {
   els.seedReroll.addEventListener("click", randomizeSeed);
   if (els.eventChip) els.eventChip.addEventListener("click", openEventDeckSheet);
 
+  // Menu → new-game setup → optional debug sandbox.
+  if (els.newGameStart) els.newGameStart.addEventListener("click", showStartSetup);
+  if (els.setupBack) els.setupBack.addEventListener("click", showStartHome);
+  if (els.openDebugSetup) els.openDebugSetup.addEventListener("click", openDebugScreen);
+  if (els.debugBack) els.debugBack.addEventListener("click", closeDebugScreen);
+  if (els.debugDone) els.debugDone.addEventListener("click", closeDebugScreen);
+  if (els.debugReset) els.debugReset.addEventListener("click", handleDebugReset);
+  if (els.debugScreen) {
+    els.debugScreen.addEventListener("click", handleDebugScreenClick);
+    els.debugScreen.addEventListener("input", handleDebugScreenInput);
+    els.debugScreen.addEventListener("change", handleDebugScreenChange);
+  }
+
   // Save / load: topbar chip, start-screen continue and the shared file picker.
   if (els.saveChip) els.saveChip.addEventListener("click", openSaveSheet);
   if (els.continueSave) els.continueSave.addEventListener("click", continueSavedGame);
@@ -375,9 +388,13 @@ function bindEvents() {
   // End screen.
   els.playAgain.addEventListener("click", resetGame);
 
-  // Escape closes the layer menu first, then sheets (desktop convenience).
+  // Escape closes the layer menu first, then the debug sandbox, then sheets.
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Escape") return;
+    if (els.debugScreen && !els.debugScreen.classList.contains("hidden")) {
+      closeDebugScreen();
+      return;
+    }
     if (els.sectorLayerMenu && !els.sectorLayerMenu.classList.contains("hidden")) {
       closeSectorLayerMenu();
       if (els.sectorViewBtn) els.sectorViewBtn.focus();
@@ -401,5 +418,6 @@ state = createInitialState(null);
 bindEvents();
 renderEthics();
 renderContinueSave();
+showStartPage("home");
 renderAll();
 scrollGalaxyToCurrentSector();

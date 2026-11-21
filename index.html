@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="css/sheets.css">
 <link rel="stylesheet" href="css/event.css">
 <link rel="stylesheet" href="css/screens.css">
+<link rel="stylesheet" href="css/debug.css">
 <link rel="stylesheet" href="css/utilities.css">
 </head>
 <body>
@@ -344,13 +345,21 @@
   <div class="event-instruction" id="event-instruction">◀ swipe left for A · swipe right for B ▶</div>
 </section>
 
-<!-- START SCREEN -->
-<section id="start-screen" aria-label="Start game">
-  <div class="start-inner">
+<!-- HOME + NEW GAME SETUP -->
+<section id="start-screen" aria-label="Main menu">
+  <div class="start-inner" id="home-page">
     <div class="start-mark">✦</div>
     <p class="start-kicker">FIELD PROTOTYPE / CORE LOOP</p>
     <h1>STELLAR<br><span>DOMINION</span></h1>
     <p class="start-copy">A turn-based test of exploration, expansion and survival. Command a tiny fleet, chart the fog, patrol your lanes and outlast the rival powers.</p>
+    <button class="start-primary" id="new-game-start" type="button">
+      <span class="start-primary-icon" aria-hidden="true">▶</span>
+      <span class="start-primary-copy">
+        <b>START A NEW GAME</b>
+        <small>CHOOSE YOUR RACE · SEED · RULES</small>
+      </span>
+      <span class="start-primary-chevron" aria-hidden="true">›</span>
+    </button>
     <div class="save-resume" id="save-resume">
       <div class="save-resume-head">
         <span class="save-resume-label">SAVED RUN</span>
@@ -366,15 +375,52 @@
       </button>
       <button class="save-file-btn" id="load-save-file-start" type="button">LOAD SAVE FILE…</button>
     </div>
-    <div class="ethics-label"><span>CHOOSE ONE ETHIC</span><span>ONE TAP</span></div>
+    <p class="start-footer">LOCAL SAVES · NO SOUND · SINGLE-PLAYER PROTOTYPE</p>
+  </div>
+
+  <div class="start-inner hidden" id="setup-page">
+    <button class="setup-back" id="setup-back" type="button">← MAIN MENU</button>
+    <p class="start-kicker">NEW EXPEDITION / CHOOSE YOUR RACE</p>
+    <h1>CHOOSE<br><span>YOUR RACE</span></h1>
+    <p class="start-copy">Every origin bends the same starting position. Pick the doctrine that will decide how you expand, research and survive the other powers.</p>
+    <div class="ethics-label"><span>CHOOSE ONE ETHIC</span><span>ONE TAP TO START</span></div>
     <div class="ethics-list" id="ethics-list"></div>
     <div class="seed-row">
       <label class="seed-label" for="seed-input">GALAXY SEED</label>
       <input class="seed-input" id="seed-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="20261112" aria-label="Galaxy seed">
       <button class="seed-reroll" id="seed-reroll" type="button" aria-label="Randomize galaxy seed">RANDOM</button>
     </div>
+    <button class="debug-open-btn" id="open-debug-from-setup" type="button">
+      <span class="debug-open-icon" aria-hidden="true">⚙</span>
+      <span class="debug-open-copy">
+        <b>DEBUG SETTINGS</b>
+        <small>TWEAK ECONOMY, EVENTS AND EVERY RULE FOR THIS MATCH</small>
+      </span>
+      <span class="debug-open-chevron" aria-hidden="true">›</span>
+    </button>
     <p class="start-footer">LOCAL SAVES · NO SOUND · SINGLE-PLAYER PROTOTYPE</p>
   </div>
+</section>
+
+<!-- DEBUG SETTINGS -->
+<section id="debug-screen" class="fullscreen hidden" aria-label="Debug settings" aria-hidden="true">
+  <header class="debug-top">
+    <button class="back-btn" id="debug-back" aria-label="Close debug settings">←</button>
+    <div class="debug-head-main">
+      <span class="kicker" id="debug-kicker">NEW MATCH SETUP</span>
+      <h1>Debug settings</h1>
+    </div>
+    <button class="debug-reset" id="debug-reset" type="button" title="Reset every rule to its default">RESET</button>
+  </header>
+  <div class="debug-context" id="debug-context"></div>
+  <div class="debug-tabs" id="debug-tabs" role="tablist" aria-label="Debug categories"></div>
+  <p class="debug-blurb" id="debug-blurb"></p>
+  <div class="debug-scroll" id="debug-scroll">
+    <div class="debug-body" id="debug-body"></div>
+  </div>
+  <footer class="debug-foot">
+    <button class="primary-btn" id="debug-done" type="button">DONE</button>
+  </footer>
 </section>
 
 <!-- END SCREEN -->
@@ -400,7 +446,7 @@
 <input type="file" id="save-file-input" accept=".json,application/json" hidden>
 
 <!-- Classic scripts share one global scope and run in this order.
-     data -> core (rng, galaxy, state, rules, economy) -> ui -> game -> main. -->
+     data -> core (rng, galaxy, state, run-rules, rules, economy) -> ui -> game -> main. -->
 <script src="js/data/config.js"></script>
 <script src="js/data/ethics.js"></script>
 <script src="js/data/buildings.js"></script>
@@ -412,9 +458,11 @@
 <script src="js/data/anomalies.js"></script>
 <script src="js/data/resources.js"></script>
 <script src="js/data/systems.js"></script>
+<script src="js/data/debug-schema.js"></script>
 <script src="js/core/rng.js"></script>
 <script src="js/core/galaxy.js"></script>
 <script src="js/core/state.js"></script>
+<script src="js/core/run-rules.js"></script>
 <script src="js/core/helpers.js"></script>
 <script src="js/core/colony.js"></script>
 <script src="js/core/colony-economy.js"></script>
@@ -430,6 +478,7 @@
 <script src="js/core/save.js"></script>
 <script src="js/ui/dom.js"></script>
 <script src="js/ui/start-screen.js"></script>
+<script src="js/ui/debug-screen.js"></script>
 <script src="js/ui/topbar.js"></script>
 <script src="js/ui/map.js"></script>
 <script src="js/ui/galaxy-view.js"></script>

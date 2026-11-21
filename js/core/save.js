@@ -11,8 +11,12 @@
 
 const SAVE_FORMAT = "stellar-dominion-save";
 /* v2: population maintenance is a percentage policy and colonies carry
-   explicit worker orders. v1 saves cannot be read by this build. */
-const SAVE_VERSION = 2;
+   explicit worker orders.
+   v3: the snapshot also carries the run's whole rulebook (CONFIG, event deck
+   and content tables), so every match can play with its own balance.
+   v2 files still load and pick up the default rulebook. v1 is rejected. */
+const SAVE_VERSION = 3;
+const SAVE_READ_VERSION_MIN = 2;
 const SAVE_STORAGE_KEY = "stellar-dominion-mvp3-save";
 
 function isSaveablePhase(phase) {
@@ -67,6 +71,9 @@ function createSaveSnapshot(source) {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
+    /* The live rulebook, not a copy frozen at run start: the debug console
+       edits the globals, so this is what the run is actually playing with. */
+    rules: captureRunRules(),
     state: cloneSaveState(game),
     rngStreams: {
       events: getRngPosition(game.rng),
@@ -84,9 +91,9 @@ function readSaveSnapshot(raw) {
   if (raw.format !== SAVE_FORMAT) {
     throw new Error("That file is not a Stellar Dominion save.");
   }
-  if (raw.version !== SAVE_VERSION) {
+  if (typeof raw.version !== "number" || raw.version < SAVE_READ_VERSION_MIN || raw.version > SAVE_VERSION) {
     throw new Error("That save uses format version " + raw.version +
-      "; this build reads version " + SAVE_VERSION + ".");
+      "; this build reads versions " + SAVE_READ_VERSION_MIN + " to " + SAVE_VERSION + ".");
   }
   const game = raw.state;
   if (!game || typeof game !== "object") throw new Error("The save has no game state.");
@@ -302,9 +309,23 @@ function syncSaveCounters(game) {
 
 function restoreSaveSnapshot(raw) {
   const save = readSaveSnapshot(raw);
-  /* A fresh copy keeps the caller's object (often parsed storage) untouched. */
-  const game = normalizeRestoredState(JSON.parse(JSON.stringify(save.state)));
+  /* Applying a rulebook rewrites the live CONFIG and content tables. Keep the
+     current one so a malformed save cannot leave the open run on half-applied
+     rules when normalisation throws below. */
+  const previousRules = captureRunRules();
+  let game;
+  try {
+    applyRunRules(save.rules);
+    /* A fresh copy keeps the caller's object (often parsed storage) untouched. */
+    game = normalizeRestoredState(JSON.parse(JSON.stringify(save.state)));
+  } catch (error) {
+    applyRunRules(previousRules);
+    throw error;
+  }
   const seed = game.galaxy.seed >>> 0;
+  /* The galaxy seed is part of both the state and the rulebook. The run's own
+     seed wins, so the start-screen field and a later snapshot agree. */
+  CONFIG.galaxy.seed = seed;
   const streams = save.rngStreams || {};
   game.rng = createRng(((seed ^ 0x9e3779b9) >>> 0));
   setRngPosition(game.rng, streams.events);
@@ -330,7 +351,8 @@ function getSaveMetadata(raw) {
     ethicName: ethic ? ethic.name : "No ethic",
     colonies: game.systems.filter(function (system) { return system && system.colonized; }).length,
     sectors: game.galaxy.sectors.length,
-    phase: game.phase
+    phase: game.phase,
+    rulesOverrides: save.rules ? countRuleOverrides(save.rules) : 0
   };
 }
 

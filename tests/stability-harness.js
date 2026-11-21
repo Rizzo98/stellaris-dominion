@@ -32,6 +32,7 @@ const files = [
   "js/core/rng.js",
   "js/core/galaxy.js",
   "js/core/state.js",
+  "js/core/run-rules.js",
   "js/core/helpers.js",
   "js/core/colony.js",
   "js/core/colony-economy.js",

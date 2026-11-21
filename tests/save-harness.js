@@ -32,6 +32,7 @@ const files = [
   "js/core/rng.js",
   "js/core/galaxy.js",
   "js/core/state.js",
+  "js/core/run-rules.js",
   "js/core/helpers.js",
   "js/core/colony.js",
   "js/core/colony-economy.js",
@@ -212,7 +213,7 @@ function testSnapshotRoundTrip() {
   ok(text.length > 10000, "the snapshot is a full JSON dump, not a bookmark (" + text.length + " bytes)");
   const raw = JSON.parse(text);
   eq(raw.format, "stellar-dominion-save", "the snapshot carries the save format id");
-  eq(raw.version, 2, "the snapshot carries the format version");
+  eq(raw.version, 3, "the snapshot carries the format version");
   eq(raw.state.turn, 7, "the turn is in the snapshot");
   ok(typeof raw.savedAt === "string" && raw.savedAt.length > 10, "the snapshot records when it was made");
   ok(typeof raw.rngStreams.events === "number" && typeof raw.rngStreams.military === "number",

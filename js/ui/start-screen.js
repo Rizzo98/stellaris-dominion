@@ -1,6 +1,30 @@
 /* ============================================================
-   START SCREEN — the ethics picker and galaxy seed control
+   START SCREEN — the menu, the new-game setup and the seed control
+   The home page offers START A NEW GAME or CONTINUE. The setup page keeps the
+   older one-tap ethics picker, the seed field and the debug console entry.
    ============================================================ */
+
+let startScreenPage = "home";
+
+function showStartPage(page) {
+  startScreenPage = page === "setup" ? "setup" : "home";
+  if (els.homePage) els.homePage.classList.toggle("hidden", startScreenPage !== "home");
+  if (els.setupPage) els.setupPage.classList.toggle("hidden", startScreenPage !== "setup");
+  if (els.startScreen) els.startScreen.scrollTop = 0;
+  if (startScreenPage === "home") {
+    if (typeof renderContinueSave === "function") renderContinueSave();
+  } else {
+    renderEthics();
+  }
+}
+
+function showStartHome() {
+  showStartPage("home");
+}
+
+function showStartSetup() {
+  showStartPage("setup");
+}
 
 function normalizeSeedValue(value) {
   const text = String(value || "").trim();

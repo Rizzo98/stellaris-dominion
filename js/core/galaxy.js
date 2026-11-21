@@ -39,6 +39,17 @@ function galaxyNodePosition(sector) {
 }
 
 function createGalaxy(seed) {
+  /* The debug console can rewrite sector geometry before a new match. Clamp
+     the shape here, then let the fixed capital follow the entry hex instead
+     of the values it was built with when this script loaded. */
+  const sectorCfg = CONFIG.sector;
+  sectorCfg.rows = Math.max(1, Math.floor(sectorCfg.rows) || 1);
+  sectorCfg.cols = Math.max(1, Math.floor(sectorCfg.cols) || 1);
+  sectorCfg.entryRow = Math.max(0, Math.min(sectorCfg.rows - 1, Math.floor(sectorCfg.entryRow) || 0));
+  sectorCfg.entryCol = Math.max(0, Math.min(sectorCfg.cols - 1, Math.floor(sectorCfg.entryCol) || 0));
+  HOME_CAPITAL.row = sectorCfg.entryRow;
+  HOME_CAPITAL.col = sectorCfg.entryCol;
+
   const topologyRng = createRng(seed);
   const layout = createGalaxyLayout(topologyRng);
   const sectors = layout.sectors;

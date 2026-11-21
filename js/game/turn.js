@@ -358,6 +358,10 @@ function startGame(ethicId) {
   state.currentEvent = isEventDue(state.turn) ? drawEvent() : null;
   state.phase = state.currentEvent ? "event" : "actions";
   els.startScreen.classList.add("hidden");
+  if (els.debugScreen) {
+    els.debugScreen.classList.add("hidden");
+    els.debugScreen.setAttribute("aria-hidden", "true");
+  }
   els.endScreen.classList.add("hidden");
   els.planetScreen.classList.add("hidden");
   els.sheetLayer.classList.add("hidden");
@@ -387,6 +391,10 @@ function resetGame() {
   hideEventLayer();
   if (typeof closeGalaxyLayerMenu === "function") closeGalaxyLayerMenu();
   if (typeof closeSectorLayerMenu === "function") closeSectorLayerMenu();
+  if (els.debugScreen) {
+    els.debugScreen.classList.add("hidden");
+    els.debugScreen.setAttribute("aria-hidden", "true");
+  }
   els.endScreen.classList.add("hidden");
   els.endScreen.classList.remove("lose");
   els.planetScreen.classList.add("hidden");
@@ -394,12 +402,19 @@ function resetGame() {
   els.sheetLayer.setAttribute("aria-hidden", "true");
   els.sheetBody.innerHTML = "";
   delete els.sheet.dataset.kind;
+  /* A finished match does not leak its debug tweaks into the next one. The
+     seed survives so PLAY AGAIN can retry the same galaxy. */
+  const nextSeed = CONFIG.galaxy.seed;
+  resetRunRules();
+  CONFIG.galaxy.seed = nextSeed;
   els.startScreen.classList.remove("hidden");
   els.startScreen.scrollTop = 0;
   state = createInitialState(null);
   state.ui.activeTab = "map";
   els.main.scrollTop = 0;
   renderEthics();
+  renderSeedInput();
   renderContinueSave();
+  showStartPage("setup");
   renderAll();
 }

@@ -38,6 +38,8 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 
 **Quick-move pass:** holding a hex with a finger or the left mouse button is now a shortcut into the route-order pipeline. A hex with several ships raises a **Move ship** picker; a hex with one ship skips it and goes straight to the destination step. Tapping a destination still previews the route and **CONFIRM** orders it, so nothing moves instantly. The hold needs **420 ms** and **10 px** of drift tolerance (`CONFIG.hold`), charges a cyan ring and never steals the tap: with a route order already pending it declines, and the release click still picks the destination. See **Quick move (long press)** below.
 
+**Debug menu pass:** the launch screen is now a **home page** with **START A NEW GAME** and **CONTINUE**. START A NEW GAME opens the setup page with the one-tap ethics picker, the seed field and a **DEBUG SETTINGS** button that opens a six-tab rule sandbox. Every `CONFIG` leaf, event card, deck bucket, hull, building, structure, survey site, origin and tech price is editable in place; the **Economy** tab prints the live colony equations with a sample-colony preview and the **Events** tab lists every card with its odds, unlock turns, category and deck membership. Rules apply to the match being started, can be edited mid-run from the SAVE sheet, and now travel with the save file (format v3). See **Home page and debug settings** below.
+
 ## Rival empires, patrols and strongholds
 
 - **Seeded rivals** — galaxy generation calls `createRivalEmpires()`. The count (5–7), spawn sectors, names, archetypes and starting fleets come from a seeded stream that is independent of the event deck. Every ring gets one spawn before extra empires are placed, so the same seed always produces the same powers.
@@ -133,17 +135,31 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 - **Study** — open the hex's WORLD tab (or the FLEET tab) and press **BEGIN SURVEY** with a science ship stationed in that hex. The study ticks down at the end of each turn while a science ship remains; if it leaves, the survey **pauses** and keeps its progress. At zero the reward is paid once and the site reads SURVEYED.
 - **Science ships** — the only ships that can survey, they travel 2 hexes per turn, and their fleet entry is tagged `🔭 SURVEY`.
 
+## Home page and debug settings
+
+- **Home page** — `#start-screen` now holds two pages. The menu offers **START A NEW GAME** and, whenever this browser holds a readable snapshot, **CONTINUE** with its turn, race, seed and tweak count; **LOAD SAVE FILE…** stays available for a portable file. START A NEW GAME opens the setup page with the same one-tap ethics picker and seed field as before, plus a **DEBUG SETTINGS** button under the seed row.
+- **One rulebook, two entry points** — the setup page edits the rules for the match about to start; the in-game **SAVE** sheet has **OPEN DEBUG SETTINGS**, which edits the live run. Both open the same full-screen console; the context strip says `NEW MATCH` or `LIVE RUN · TURN n` and reports how many values differ from the defaults.
+- **Every leaf is editable** — the console renders the `CONFIG` sections and the content tables directly, not a parallel options copy. A new field inside a rendered table appears automatically (with a humanised label and a sane 0..1000 range); `js/data/debug-schema.js` adds better labels, units, tighter ranges, enums and list templates, and a new top-level subtree gets a section in the tab builders. Nested objects, arrays of numbers and arrays of objects all get controls, including Add/Remove for lists.
+- **Tabs** — **General** (starting stockpile, base income, colonisation, stability, refits, input timing), **Economy** (the colony equations with a live sample-colony preview, growth, maintenance, happiness tiers, facility levels, starting population/facilities, planet slots, trade and gates), **Events** (cadence, unrest chance, category weights and every card), **Galaxy** (seed, rings, layout, sector geometry, survey density, planet-type weights), **Military** (combat rules, rival spawn/raiding, archetypes and hull stats) and **Content** (buildings, orbitals, survey sites, origins and every tech price/payload).
+- **Events tab** — every encounter card carries its live **draw odds**, effective weight, unlock/retire turns, category select, enable switch and a **REMOVE FROM DECK / RESTORE TO DECK** button. Category headers show how many cards are drawable and the category's share of the deck, with one weight multiplier and an enable switch. The separate civil-unrest pool lists its cards and their pool share next to the live unrest chance at the current stability.
+- **Economy tab** — the top card prints the formulas the turn pipeline actually runs (`E_required = P^a`, `H = M_spent^b`, happiness, growth and the surplus multiplier), evaluates them for a sample colony (largest current colony by default, or a number you type) and updates as you edit. The coefficients below are the real `CONFIG.economy` values; **Reset** restores every default.
+- **Live runs vs generation** — values that are read every turn (upkeep, base income, growth, maintenance, military rules, event weights, content stats) apply immediately. Values baked when a galaxy is generated (seed, ring count, sector geometry, survey density, starting stockpile/population, planet sizes, rival spawn count) are locked in a live run and tagged **NEXT MATCH ONLY**; edit them on the setup page. A live **Galaxy** tab still explains why.
+- **Saved with the match** — the snapshot carries a top-level `rules` object (see **Saving and loading**), so two matches can play with different economies, decks and content. **CONTINUE** shows the tweak count. **PLAY AGAIN** resets the rulebook to its defaults but keeps the seed for a retry.
+- **Reset** — the header **RESET** asks for a second tap, then restores every balance table, the event deck and the content stats. On the setup page it also restores the seed and the context count returns to **DEFAULT RULES**; in a live run the sector geometry, planet-size table and seed are kept so the open galaxy keeps its shape and can still be rendered.
+- **Code** — `js/core/run-rules.js` captures, normalises, applies and resets the rulebook; `js/data/debug-schema.js` holds tabs and field metadata; `js/ui/debug-screen.js` renders the console; `css/debug.css` styles it. The setup/menu pages live in `index.html`, `js/ui/start-screen.js` and `css/screens.css`.
+
 ## Saving and loading
 
-- **Manual saves** — there is no autosave. The top bar's **SAVE** chip (shown during the action phase) opens the **Save & load** run archive: **SAVE TO BROWSER**, **LOAD SAVED RUN**, **DELETE SAVED RUN**, **DOWNLOAD SAVE FILE** and **LOAD SAVE FILE…**. The start screen shows **CONTINUE** whenever this browser holds a readable save, and keeps **LOAD SAVE FILE…** available so a downloaded run can be opened on a fresh device.
-- **What a save holds** — `createSaveSnapshot()` copies the whole mutable `state` as JSON: the galaxy and every sector (fog, fleets, rival fleets, structures, survey sites, ledgers and carry), every system (slots, building levels, population, the energy/housing maintenance percentages, pinned worker orders and banked growth), rival empires with their AI state, military counters and log, tech progress, event history, resources and stability, and the tab, viewed sector, map mode and layer preferences.
-- **What it trims** — the open sheet, a half-ordered fleet move, the selected hex/system, the spaceport menu and the event resolve lock are not restored. A loaded run always reopens on a screen the DOM can build.
+- **Manual saves** — there is no autosave. The top bar's **SAVE** chip (shown during the action phase) opens the **Save & load** run archive: **SAVE TO BROWSER**, **LOAD SAVED RUN**, **DELETE SAVED RUN**, **DOWNLOAD SAVE FILE**, **LOAD SAVE FILE…** and **OPEN DEBUG SETTINGS**. The start screen shows **CONTINUE** whenever this browser holds a readable save, and keeps **LOAD SAVE FILE…** available so a downloaded run can be opened on a fresh device.
+- **What a save holds** — `createSaveSnapshot()` copies the whole mutable `state` as JSON: the galaxy and every sector (fog, fleets, rival fleets, structures, survey sites, ledgers and carry), every system (slots, building levels, population, the energy/housing maintenance percentages, pinned worker orders and banked growth), rival empires with their AI state, military counters and log, tech progress, event history, resources and stability, and the tab, viewed sector, map mode and layer preferences. It also carries `rules`, the run's whole rulebook (see below).
+- **The rulebook** — `captureRunRules()` snapshots `CONFIG`, the event deck (category weights/enables, every card's weight/enabled/unlock turns/category, every bucket and the unrest pool) and the content tables (hulls, structures, buildings, survey sites, rival archetypes, ethics, planet types and tech prices/payloads). Loading applies it in place before the state is normalised, so the formulas, deck and content a save was played with are the ones it resumes with. A malformed rulebook falls back to the defaults field by field.
+- **What it trims** — the open sheet, a half-ordered fleet move, the selected hex/system, the spaceport menu, the debug screen and the event resolve lock are not restored. A loaded run always reopens on a screen the DOM can build.
 - **Deck continuity** — `createRng()` exposes `getState()` and `setState()`, so the snapshot also stores the two stream positions (`state.rng` for the encounter deck and `state.military.rng` for rival AI and combat). A loaded run deals the same next card and resolves the same military turn as the run it replaced.
 - **Event phase** — a save taken between the draw and the choice keeps `phase: "event"` with the pending card, and `applySaveState()` re-shows the event layer. The SAVE chip is hidden while a card is open, so this is mainly a safety net for programmatic saves.
-- **Format and errors** — a save is `{ format: "stellar-dominion-save", version: 2, savedAt, state, rngStreams }`. Version 2 stores the colony maintenance policy and worker orders; a version-1 save from the old housing/sustenance model is rejected with a clear message. `readSaveSnapshot()` also rejects another file type, a missing galaxy or a non-playable phase with a toast. A downloaded file is named `stellar-dominion-<date>-turn-<n>-seed-<seed>.json`.
-- **Storage** — the browser slot is `localStorage["stellar-dominion-mvp3-save"]`. `localStorage` is per browser and device and can be blocked (Safari private mode, some embeds); the save file works regardless. A turn-3 file is about **216 KB** of readable JSON, well inside the usual 5 MB `localStorage` budget.
-- **Loading replaces the run** — `applySaveState()` swaps the global `state`, clears timers and drag state that outlive a run, hides the start/end/planet screens, repaints every view and shows a pending event if one was saved. The current run is gone unless it was saved first.
-- **Code** — snapshot, validation and restore rules live in `js/core/save.js`; browser/file transport and the start-screen card live in `js/game/save-actions.js`; the archive body is `saveSheetHTML()` in `js/ui/sheet-content.js`, opened by `openSaveSheet()` in `js/ui/sheets.js`. Bump `SAVE_VERSION` whenever the state shape changes incompatibly.
+- **Format and errors** — a save is `{ format: "stellar-dominion-save", version: 3, savedAt, rules, state, rngStreams }`. Version 3 adds the per-match rulebook; version 2 (maintenance percentages and worker orders, no rules) still loads with the default rulebook; version 1 is rejected with a clear message. `readSaveSnapshot()` also rejects another file type, a missing galaxy or a non-playable phase with a toast. A downloaded file is named `stellar-dominion-<date>-turn-<n>-seed-<seed>.json`.
+- **Storage** — the browser slot is `localStorage["stellar-dominion-mvp3-save"]`. `localStorage` is per browser and device and can be blocked (Safari private mode, some embeds); the save file works regardless. The rulebook adds about **30 KB** of compact JSON to a snapshot, so a turn-3 file is roughly **250 KB**, well inside the usual 5 MB `localStorage` budget.
+- **Loading replaces the run** — `applySaveState()` swaps the global `state`, applies the saved rulebook, clears timers and drag state that outlive a run, hides the start/end/planet/debug screens, repaints every view and shows a pending event if one was saved. The current run is gone unless it was saved first.
+- **Code** — snapshot, validation and restore rules live in `js/core/save.js`; capture/apply of the per-match rulebook lives in `js/core/run-rules.js`; browser/file transport and the start-screen card live in `js/game/save-actions.js`; the archive body is `saveSheetHTML()` in `js/ui/sheet-content.js`, opened by `openSaveSheet()` in `js/ui/sheets.js`. Bump `SAVE_VERSION` whenever the state shape changes incompatibly.
 
 ## Quick move (long press)
 
@@ -208,7 +224,8 @@ MVP V3.0/
 │   ├── planet.css             hex/planet screen, colony slots and bonus-slot locks, clickable population card, clickable spaceport card, strongholds, radars, battle callout, patrol/contact readout, fleet tab, gate lanes, trading center route editor and sector ledger card
 │   ├── sheets.css             bottom sheet, population menu (maintenance steppers, colony meters and crew reset), run archive, battle balance bar and forecast
 │   ├── event.css              event overlay and swipe card
-│   ├── screens.css            start/end screens, saved-run CONTINUE card, seed picker
+│   ├── screens.css            home menu, new-game setup, end screen, saved-run CONTINUE card, seed picker
+│   ├── debug.css              the debug console: tabs, cards, fields, lists, event rows, economy preview and tech accordions
 │   └── utilities.css          toast, the long-press progress ring, small-screen and reduced-motion rules
 └── js/
     ├── data/                  content and balance tables
@@ -222,11 +239,13 @@ MVP V3.0/
     │   ├── events.js          EVENTS + EVENT_CATEGORIES + EVENT_BUCKETS for the paced deck, plus the separate UNREST_EVENTS pool
     │   ├── anomalies.js       ANOMALY_TYPES: survey sites, study turns and rewards
     │   ├── resources.js       RESOURCE_META (including population for effect pills) + key order
-    │   └── systems.js         home capital, sector names, planet/name pools
+    │   ├── systems.js         home capital, sector names, planet/name pools
+    │   └── debug-schema.js    debug tabs + per-field labels, ranges, enums and list templates
     ├── core/                  game rules and calculations
     │   ├── rng.js             seeded PRNG helpers
     │   ├── galaxy.js          seeded ring topology, parent lanes, shortcuts, sector maps + rival spawn
     │   ├── state.js           state factory, run counter, ship factory, starting fleet, military and rival state
+    │   ├── run-rules.js       per-match rulebook: capture/apply/reset CONFIG, the event deck and the content tables; override counting
     │   ├── helpers.js         formatting, lookups, refit-aware ship hull/speed/power, building levels and refit costs, tech effect readers (radar, gate ops, trade routes, stronghold bonuses), sector power, sector INTEL and raid forecasts
     │   ├── colony.js          planet size, standard/bonus slots, slot unlocking, the workforce plan, minimum-population gates and pinned crew orders
     │   ├── colony-economy.js  the colony economy: E_required = P^1.1, H = M_spent^0.9, happiness, growth, maintenance percentages, per-sector allocation, population-weighted happiness and growth banking
@@ -242,7 +261,8 @@ MVP V3.0/
     │   └── save.js            save snapshot, validation, restore and metadata
     ├── ui/                    rendering; reads state, writes DOM
     │   ├── dom.js             cached nodes and shared render helpers
-    │   ├── start-screen.js    ethic picker + seed control
+    │   ├── start-screen.js    home menu, new-game setup page, ethic picker + seed control
+    │   ├── debug-screen.js    the six-tab rule sandbox: generic object/list renderer, event editor, economy preview and delegated controls
     │   ├── topbar.js          sector-scoped energy/minerals, empire research/influence, economy-scope strip, stability, threat and the EVENTS deck chip
     │   ├── map.js             sector hex map, per-hull fleet badges, survey sites, rival systems/ships, in-hex and ranged war badge, red raid-warning thresholds and INTEL header, toggled charted-space wash and patrol zones, routes, threats, the sector ledger tiles and the VIEW layer menu
     │   ├── galaxy-view.js     circular ring graph, shortcut lanes, rival nodes, site counts, two-axis scroll-to-current, VIEW trade layer, trade routes and the route ledger panel
@@ -278,6 +298,7 @@ tests/
 ├── tech-harness.js            Node VM logic + UI checks for the three tech categories, building refits, ship refits and repairs, the stronghold line, radar/gate/trade techs and the new screens
 ├── save-harness.js            Node VM checks for snapshots, validation, RNG and deck continuation and a full turn on a restored run
 ├── quick-move-harness.js      Node VM checks for the long-press routing, the single-ship shortcut, the ship picker hand-off, the pending-order and phase guards and the picker markup
+├── debug-harness.js           Node VM logic + UI checks for the rulebook capture/apply/reset, nullable event gates, save v3 round-trip, v2 compatibility, all six tab layouts and the delegated controls
 └── fog-harness.js             Node VM UI checks for what the galaxy, sector, topbar and dossier screens may publish
 ```
 
@@ -286,9 +307,11 @@ tests/
 The scripts are **classic scripts sharing one global scope**, so the order in `index.html` is the dependency order:
 
 ```
-data → core (rng, galaxy, state, rules, colony economy, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save) → ui → game → main
+data (… debug-schema) → core (rng, galaxy, state, run-rules, helpers, colony economy, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save) → ui (… debug-screen) → game → main
 ```
-`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js`, `tests/quick-move-harness.js` and `tests/save-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech, stability and quick-move harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js`, `tests/quick-move-harness.js`, `tests/save-harness.js` and `tests/debug-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech, stability, quick-move and debug harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+
+`js/data/debug-schema.js` follows `systems.js` and `js/core/run-rules.js` follows `state.js`: the rulebook captures its defaults at load time, so every data table has to exist first. `js/ui/debug-screen.js` follows `dom.js` and `start-screen.js` and still loads before `main.js`.
 
 `js/ui/long-press.js` sits at the end of the `ui` group (before the `game` files) and `js/game/quick-move.js` follows `planet-nav.js`, because the quick move hands its ship to `beginFleetMove()`.
 
@@ -300,6 +323,7 @@ state = createInitialState(null);
 bindEvents();
 renderEthics();
 renderContinueSave();   // shows CONTINUE when localStorage holds a run
+showStartPage("home");  // the menu; START A NEW GAME opens the setup page
 renderAll();
 scrollGalaxyToCurrentSector();
 ```
@@ -308,9 +332,11 @@ When adding a file, add its `<script>` tag in the right layer and keep `main.js`
 
 ## Where to change what
 
+Most balance rows below are also editable without touching code from the **debug console** (START A NEW GAME → DEBUG SETTINGS, or SAVE → OPEN DEBUG SETTINGS). The table is for permanent content and code changes.
+
 | I want to… | Edit |
 | --- | --- |
-| Generate a different galaxy | Seed picker on the start screen, or `CONFIG.galaxy.seed` in `js/data/config.js` |
+| Generate a different galaxy | Seed picker on the new-game setup page (or the debug **Galaxy** tab), or `CONFIG.galaxy.seed` in `js/data/config.js` |
 | Change ring count, ring-one width, ring growth, parent randomness, shortcuts, systems per sector or the inner-ring spacing curve | `CONFIG.galaxy` in `js/data/config.js` |
 | Change sector size or entry hex | `CONFIG.sector` in `js/data/config.js` (`HOME_CAPITAL` follows the entry hex; landing ports follow the perimeter in `js/core/hex-grid.js` and are assigned in `js/core/galaxy.js`) |
 | Change how parent lanes or shortcuts are chosen | `js/core/galaxy.js` |
@@ -401,14 +427,19 @@ When adding a file, add its `<script>` tag in the right layer and keep `main.js`
 | Change a screen's look | the matching file in `css/` |
 | Change what a non-map button does | `js/game/` |
 | Change what a save contains or how a snapshot is validated/restored | `js/core/save.js` |
+| Change the per-match rulebook (what is captured, applied, reset or counted) | `js/core/run-rules.js` |
 | Change the browser slot, file download/load or the start-screen CONTINUE card | `js/game/save-actions.js` |
 | Change the save sheet or its actions | `js/ui/sheet-content.js` (`saveSheetHTML`), `js/ui/sheets.js` (`openSaveSheet`), `css/sheets.css` |
 | Change the SAVE chip or the saved-run card look | `index.html`, `js/ui/topbar.js`, `css/topbar.css`, `css/screens.css` |
+| Change the home menu, the START A NEW GAME flow or the setup page | `index.html`, `js/ui/start-screen.js`, `css/screens.css` |
+| Add or reorder a debug tab, or change how a tab renders | `js/data/debug-schema.js` (`DEBUG_TABS`), `js/ui/debug-screen.js` (`debugTabHTML`) |
+| Give a debug field a better label, range, enum or list template | `js/data/debug-schema.js` (`DEBUG_FIELD_META`, `DEBUG_CONTENT_FIELDS`) |
+| Change the debug console layout or styling | `index.html` (`#debug-screen`), `js/ui/debug-screen.js`, `css/debug.css` |
 | Add a listener or change boot order | `js/main.js` |
 
 ## Verification
 
-The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Quick move pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
+The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Debug settings pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
 
 The randomized ring galaxy was exercised in headless Chrome with scripted runs:
 
@@ -653,3 +684,17 @@ Long-pressing a hex is now a shortcut into the route-order pipeline: pick a ship
 - **Pending order:** a hold while a route was being chosen declined the gesture (`handleHexLongPress` returned `false`), kept the sheet closed, kept `state.ui.move` alive and let the release click pick the destination (`previewDestination` became the held hex).
 - **Long hold:** a 2.6 s mouse hold on a single-ship hex set the order and still swallowed its release click; a destination tap immediately afterwards previewed the route, so the guard re-arms on release and clears on the next press.
 - **Page health:** the scripted run at **390 × 844** raised no console errors; screenshots confirmed the charging ring, the picker, the move banner and the route preview. At **320 × 640** the picker fitted the viewport (76% of the height, no horizontal overflow).
+
+### Debug settings pass
+
+The launch screen is now a menu, and every match can carry its own balance. `node tests/debug-harness.js` is a new Node VM harness with **113 checks** covering the rulebook, the save round-trip, the console markup and every field binding; the colony (**306**), economy (**154**), fog (**74**), military (**217**), name (**61**), population (**172**), quick-move (**41**), save (**63**), stability (**126**) and technology (**213**) harnesses still pass.
+
+- **Rulebook round-trip:** mutating `CONFIG.economy.population.energyExponent`, starting stock, facility levels, an event weight, a retired bucket card, a category multiplier, an unrest weight, a hull stat, a tech price and a survey-site duration all survived capture → reset → apply. `BUILDINGS.mine.levels` kept the identity of `CONFIG.economy.facilities.levels` throughout, so the shared facility table stayed in sync. An explicit `maxTurn` survived, and a deleted `minTurn` stayed deleted (the generic merge would otherwise restore the default gate).
+- **Content and counts:** `resetRunRules()` restored every edited value and returned `countRuleOverrides()` to **0**; `applyRunRules(customRules)` restored every one again. A save with a handful of edits reported a non-zero tweak count in `getSaveMetadata()`.
+- **Normalisation:** an empty facility-level list, happiness-tier list or planet-size list fell back to the defaults, so a hand-edited save cannot leave the game with no levels or sizes. A cleared event `minTurn` stayed cleared and an explicit `maxTurn` survived, as above.
+- **Save format v3:** `createSaveSnapshot()` now includes a top-level `rules` object. A full snapshot was about **160 KB** of compact JSON at turn 1, of which the rulebook was about **29 KB**. Loading applies the rules before normalising the state, restores the formula, base income, deck, retired card and structure cost, and keeps the run's own galaxy seed. A version-2 snapshot (no `rules`) loads with the default rulebook; a version-1 snapshot is still rejected with the format message.
+- **Six tabs:** the general tab renders starting resources, income and stability controls; the economy tab prints `E_required = P ^ a` and the growth-ceiling preview; the events tab lists the 8 encounter cards and 6 unrest cards with weight fields, category multipliers, deck buttons and live **draw odds**; the galaxy tab exposes the seed/ring/geometry fields and a reroll button; the military tab exposes combat rules, rival tuning, archetypes and hulls; the content tab lists buildings, orbitals, survey sites, origins and every tech price/payload. None of the six tabs printed `undefined`.
+- **Binding audit:** a regex pass over every rendered tab matched all **source + path** pairs on the controls against `debugSourceTarget()` / `getRulePathValue()`; every path resolved to a live value and every control type (number, select, text, switch) matched its value type. The nested wrappers (`stability.start`, `economy.workforce.defaultStrategy`, `economy.startingFacilities[0].level`, `galaxy.jumpEnergyCost`) and the two top-level list editors (happiness tiers and starting facilities) were exercised through real handler calls, not only markup.
+- **Delegated controls:** a fake click on a card switch disabled and re-enabled it; the deck button retired and restored `pirateRaiders`; the category weight input wrote `EVENT_CATEGORIES.hazard.weightMult`; an unrest weight was editable while the card was disabled, and its switch re-enabled it; a generic number input wrote the live growth exponent and refreshed the preview; a text input wrote a happiness-tier label; a boolean switch wrote `CONFIG.anomalies.enabled`; the interval-ramp list added a template and removed it; a hull attack field and a hull refit list wrote the content table; the two-tap RESET restored the defaults.
+- **Browser flow:** a scripted headless-Chrome run at **440 × 1000** passed **30 checks** with no page console errors: boot on the home menu, START A NEW GAME opens the setup page, DEBUG SETTINGS opens from setup, all six tabs are present, the exponent, starting-facility, event-weight and jump-cost controls all apply and the economy preview follows the exponent, a card is retired, a race starts with every edit intact, the SAVE sheet offers and opens the live console, generation fields are disabled in the live run, a live RESET restores the balance while keeping the open galaxy's sector shape, planet-size table and seed, the custom save carries the rulebook and the retired card, loading restores both, and every rendered field in every tab binds to a live path. Screenshots confirmed the home menu and all six debug tabs.
+- **Browser storage:** a second **8-check** headless-Chrome pass saved a live run to `localStorage`, confirmed the stored snapshot carried its rulebook, saw **CONTINUE** with the tweak count, used **PLAY AGAIN** (rules back to defaults), then continued and got both the run and its custom rules back.

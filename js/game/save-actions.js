@@ -160,6 +160,7 @@ function applySaveState(save, sourceLabel) {
   }
   hideToast();
   closeSheet();
+  if (els.debugScreen && !els.debugScreen.classList.contains("hidden")) closeDebugScreen();
   hideEventLayer();
   if (typeof closeGalaxyLayerMenu === "function") closeGalaxyLayerMenu();
   if (typeof closeSectorLayerMenu === "function") closeSectorLayerMenu();
@@ -221,6 +222,11 @@ function handleSaveAction(action) {
     requestSaveFileLoad();
     return true;
   }
+  if (action === "debug") {
+    closeSheet();
+    openDebugScreen();
+    return true;
+  }
   return false;
 }
 
@@ -244,6 +250,7 @@ function renderContinueSave() {
   }
   if (els.saveResumeSub) {
     els.saveResumeSub.textContent = meta.colonies +
-      (meta.colonies === 1 ? " COLONY" : " COLONIES") + " · SEED " + meta.seed;
+      (meta.colonies === 1 ? " COLONY" : " COLONIES") + " · SEED " + meta.seed +
+      (meta.rulesOverrides ? " · " + meta.rulesOverrides + " TWEAKS" : "");
   }
 }

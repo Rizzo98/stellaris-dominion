@@ -154,6 +154,17 @@ function saveSheetHTML() {
   parts.push('<button class="secondary-btn" type="button" data-save-action="file-load">LOAD SAVE FILE…</button>');
   parts.push("</div>");
 
+  const ruleTweaks = countRuleOverrides();
+  parts.push('<div class="sheet-section save-actions"><h3>DEBUG SETTINGS</h3>');
+  parts.push(
+    '<p class="save-status">Every balance table can be tuned per match: ' +
+      (ruleTweaks ? "<b>" + ruleTweaks + "</b> rule" + (ruleTweaks === 1 ? "" : "s") + " differ from the defaults." : "This run is on the default rulebook.") +
+    "</p>"
+  );
+  parts.push('<button class="secondary-btn" type="button" data-save-action="debug">OPEN DEBUG SETTINGS</button>');
+  parts.push('<p class="sheet-note">Changes apply immediately and are written into the save file with the run, so this match can be resumed with its own economy, event odds and content.</p>');
+  parts.push("</div>");
+
   parts.push(
     '<p class="sheet-note">Loading replaces the current run, so save first if you want to keep it. ' +
     "The snapshot stores the galaxy, every sector, fleet, colony, tech, event history and the " +
