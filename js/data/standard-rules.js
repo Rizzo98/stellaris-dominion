@@ -4,7 +4,7 @@
    this file by hand: every debug edit published from the console replaces
    it, including these comments and the metadata below.
 
-   Published by @Rizzo98 on 2026-11-25T11:05:59.221Z.
+   Published by @Rizzo98 on 2026-11-25T11:15:52.542Z.
    js/core/run-rules.js applies it over the in-code tables before it
    captures RUN_RULE_DEFAULTS, so RESET, the tweak counter and every new
    match start from these values.
@@ -14,9 +14,11 @@ const STANDARD_RULES_META = {
   "schema": 1,
   "app": "Stellar Dominion MVP v3.0",
   "pushedBy": "Rizzo98",
-  "pushedAt": "2026-11-25T11:05:59.221Z",
-  "tweaks": 4,
-  "seed": 20261112
+  "pushedAt": "2026-11-25T11:15:52.542Z",
+  "tweaks": 5,
+  "turn": 13,
+  "seed": 64031241,
+  "origin": "Pacifist"
 };
 
 const STANDARD_RULES = {
@@ -117,7 +119,7 @@ const STANDARD_RULES = {
       ],
       "population": {
         "baseGrowthRate": 0.05,
-        "energyExponent": 1.1,
+        "energyExponent": 1.05,
         "housingExponent": 0.9,
         "happinessMax": 100
       },
@@ -184,20 +186,20 @@ const STANDARD_RULES = {
             "level": 2,
             "name": "Industrial",
             "minPopulation": 10,
-            "workers": 5,
+            "workers": 6,
             "output": 16
           },
           {
             "level": 3,
             "name": "Advanced",
-            "minPopulation": 40,
+            "minPopulation": 30,
             "workers": 9,
             "output": 32
           },
           {
             "level": 4,
             "name": "Megastructural",
-            "minPopulation": 100,
+            "minPopulation": 80,
             "workers": 14,
             "output": 64
           }
@@ -252,7 +254,7 @@ const STANDARD_RULES = {
       "mapPaddingBottom": 24
     },
     "galaxy": {
-      "seed": 20261112,
+      "seed": 64031241,
       "jumpEnergyCost": 2,
       "outerRings": 4,
       "ringOneMin": 4,
