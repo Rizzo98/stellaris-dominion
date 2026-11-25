@@ -9,9 +9,10 @@
 
    It covers the three tech categories and their catalogue integrity, the rule
    that a completed tech never upgrades a standing building or ship by itself,
-   the half-build-cost building refit, the spaceport-gated ship refit and
-   repair, the stronghold line, the radar and gate throughput lines and the
-   trading center's extra routes.
+   the half-build-cost building refit and its population gate (a facility is
+   never promoted into a level the colony cannot crew), the spaceport-gated
+   ship refit and repair, the stronghold line, the radar and gate throughput
+   lines and the trading center's extra routes.
    ============================================================ */
 
 const fs = require("fs");
@@ -347,6 +348,23 @@ function testBuildingLevels() {
     "a newly built mine starts at level 1");
   eq(run("getBuildingUnlockedLevel('mine')"), 1, "no refit is unlocked before the tech");
 
+  /* Production facilities have a population gate per level. The raw rule still
+     blocks a facility that sits under its gate ... */
+  run("getSystem(" + JSON.stringify(systemId) + ").slots[0].level = 2");
+  eq(run("getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")).entries[0].eligible"), false,
+    "a level 2 facility is blocked below its 15 population gate");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 0,
+    "a blocked facility produces nothing");
+  run("getSystem(" + JSON.stringify(systemId) + ").slots[0].level = 1");
+
+  /* ... and the refit order refuses to create that state by promotion. */
+  const gateReason = run("getBuildingRefitPopulationReason(getSystem(" +
+    JSON.stringify(systemId) + "), 'mine', 2)");
+  ok(typeof gateReason === "string" && gateReason.indexOf("15 population") !== -1 &&
+    gateReason.indexOf("12") !== -1, "the gate names the level's minimum population and the colony's people");
+  eq(run("getBuildingRefitPopulationReason(getSystem(" + JSON.stringify(systemId) + "), 'lab', 2)"), null,
+    "support buildings have no population gate");
+
   /* The researched tech must not touch the standing building. */
   run("grantTech('mineTech1')");
   eq(run("getBuildingUnlockedLevel('mine')"), 2, "the tech unlocks level 2");
@@ -355,16 +373,27 @@ function testBuildingLevels() {
   eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 8,
     "the standing mine keeps its level 1 yield after the tech");
 
+  /* Level 2 needs 15 people: 12 is not enough, so the order is refused and the
+     working level 1 mine keeps producing. */
   const before = run("getSectorStock('sec-core', 'minerals')");
+  eq(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), false,
+    "a refit is refused while the colony is below the new level's population gate");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 1,
+    "the refused refit leaves the working mine at level 1");
+  eq(run("getSectorStock('sec-core', 'minerals')"), before,
+    "the refused refit spends no minerals");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 8,
+    "the refused refit keeps the level 1 yield online");
+
+  run("homeSystem().population = 20");
+  eq(run("getBuildingRefitPopulationReason(getSystem(" + JSON.stringify(systemId) + "), 'mine', 2)"), null,
+    "the gate clears once the colony reaches it");
   ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), "the refit button applies the level");
   eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 2,
     "the building is refitted to level 2");
   eq(run("getSectorStock('sec-core', 'minerals')"), before - 3, "the refit costs half the build cost");
-  eq(run("getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")).entries[0].eligible"), false,
-    "a level 2 facility is blocked below its 15 population gate");
-  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 0,
-    "a blocked facility produces nothing");
-  run("homeSystem().population = 20");
+  eq(run("getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")).entries[0].eligible"), true,
+    "a level 2 facility runs at 20 population");
   eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 16,
     "once the colony reaches the gate the refitted mine yields 16 minerals");
 
@@ -377,23 +406,57 @@ function testBuildingLevels() {
 
   run("grantTech('mineTech2')");
   eq(run("getBuildingUnlockedLevel('mine')"), 3, "the second tech unlocks level 3");
+
+  /* Level 3 needs 40 people: the mine stays at its working level 2 instead of
+     being promoted into a blocked level 3. */
+  eq(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), false,
+    "the level 3 refit is refused below its 40 population gate");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 2,
+    "the refused level 3 refit leaves the level 2 mine standing");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 16,
+    "the refused level 3 refit keeps the level 2 production online");
+
+  run("homeSystem().population = 40");
   run("setSectorStock('sec-core', 'minerals', 60)");
-  ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"));
+  ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"),
+    "the level 3 refit is allowed once the colony reaches 40 population");
   eq(run("getBuildingOutput(getSystem(" + JSON.stringify(systemId) + ").slots[0].type, 3).minerals"), 32,
     "level 3 produces 32 minerals");
 
-  /* A refit with an empty ledger is refused. */
+  /* Level 4 needs 100 people. The gate wins over the ledger while it applies;
+     with the colony large enough an empty ledger is the remaining refusal. */
   run("grantTech('mineTech3')");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 3,
+    "the level 4 tech does not promote the standing mine");
+  eq(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), false,
+    "the level 4 refit is refused below its 100 population gate");
+  run("homeSystem().population = 100");
   run("setSectorStock('sec-core', 'minerals', 0)");
   eq(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), false,
     "the refit is refused without minerals in the sector");
   eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 3,
     "the refused refit leaves the building at level 3");
+  run("setSectorStock('sec-core', 'minerals', 60)");
+  ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"),
+    "the level 4 refit lands once the colony and the ledger both allow it");
+  eq(run("getPlanetBreakdown(getSystem(" + JSON.stringify(systemId) + ")).typeStats.mine.output.minerals"), 64,
+    "level 4 produces 64 minerals");
 
-  /* The tech line is per building: a lab tech does not unlock the mine. */
+  /* The tech line is per building, and a support building has no population
+     gate: a Lab refits at any colony size. */
+  run("homeSystem().population = 12");
+  run("setSectorStock('sec-core', 'minerals', 60)");
+  run("buildInSlot(" + JSON.stringify(systemId) + ", 1, 'lab')");
+  run("finishConstruction()");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[1])"), 1,
+    "the Lab opens at level 1 before its own tech");
   run("grantTech('labTech1')");
   eq(run("getBuildingUnlockedLevel('lab')"), 2, "the lab line is independent");
   eq(run("getBuildingUnlockedLevel('mine')"), 4, "the mine line remembers its own techs");
+  ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 1)"),
+    "a Lab refits without a population gate");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[1])"), 2,
+    "the Lab reaches level 2 at 12 population");
 
   /* A building laid down AFTER the tech opens at the unlocked level, which is
      what makes the half-price refit a retrofit rather than a rebuild. */
@@ -729,22 +792,46 @@ function testColonyRefitUI() {
   ok(tile.indexOf("data-upgrade-building") === -1,
     "no refit button while nothing is unlocked");
 
+  /* The unlocked refit is advertised, but a colony below the next level's
+     population gate disables it and says why. */
   run("grantTech('mineTech1')");
   tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");
   ok(tile.indexOf('data-upgrade-building="0"') !== -1, "the slot grows a refit button");
   ok(tile.indexOf("REFIT") !== -1, "the refit button is labelled");
+  ok(tile.indexOf("NEEDS 15 POP") !== -1, "the gated button names the population the level needs");
+  ok(tile.indexOf('data-upgrade-building="0" disabled') !== -1,
+    "the population gate disables the refit");
+  ok(tile.indexOf("needs a colony of 15 population") !== -1,
+    "the disabled button explains the gate in its title");
+  ok(tile.indexOf("slot-refit gated") !== -1, "the gated button wears its own style");
+  eq(run("getBuildingLevel(getSystem(" + JSON.stringify(systemId) + ").slots[0])"), 1,
+    "the gated button leaves the working mine alone");
 
-  run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)");
+  /* The colony grows past the gate: the same button becomes actionable. */
+  run("homeSystem().population = 20");
+  tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");
+  ok(tile.indexOf('data-upgrade-building="0" disabled') === -1, "the refit unlocks once the colony can support it");
+  ok(tile.indexOf("slot-refit gated") === -1, "the gate style is gone");
+  ok(tile.indexOf("· 3 ⛏") !== -1, "the priced refit is back");
+
+  ok(run("upgradeBuilding(" + JSON.stringify(systemId) + ", 0)"), "the allowed refit applies");
   tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");
   ok(tile.indexOf("LVL 2") !== -1, "the slot shows its level");
   ok(tile.indexOf("data-upgrade-building") === -1, "the button disappears once refitted");
 
-  /* A short ledger disables the button instead of hiding it. */
+  /* The level 3 gate (40) disables the next refit; with the colony large
+     enough, a short ledger becomes the reason the button shows instead. */
   run("grantTech('mineTech2')");
+  tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");
+  ok(tile.indexOf("NEEDS 40 POP") !== -1, "the level 3 gate is named at 20 population");
+  ok(tile.indexOf('data-upgrade-building="0" disabled') !== -1, "the level 3 refit is disabled");
+  run("homeSystem().population = 40");
   run("setSectorStock('sec-core', 'minerals', 0)");
   tile = run("slotTileHTML(getSystem(" + JSON.stringify(systemId) + "), 0, getWorkforcePlan(getSystem(" + JSON.stringify(systemId) + ")))");
   ok(tile.indexOf("data-upgrade-building") !== -1, "the waiting refit is still advertised");
   ok(tile.indexOf('data-upgrade-building="0" disabled') !== -1, "a short ledger disables the refit");
+  ok(tile.indexOf("slot-refit short") !== -1, "the short-ledger style is used");
+  ok(tile.indexOf("Need 3 minerals") !== -1, "the disabled button explains the ledger in its title");
 }
 
 function testDrydockUI() {

@@ -231,6 +231,8 @@
 .slot-refit .slot-refit-label{font-family:var(--mono);font-size:7px;font-weight:750;letter-spacing:.06em}
 .slot-refit .slot-refit-cost{font-family:var(--mono);font-size:6.2px;letter-spacing:.02em;color:var(--muted);white-space:nowrap}
 .slot-refit.short{border-color:rgba(255,122,122,.3);color:#ffb9b9;background:rgba(46,21,27,.42)}
+/* Below the next level's population gate: the order is refused, not priced. */
+.slot-refit.gated{border-color:rgba(244,201,107,.32);color:var(--gold);background:rgba(46,37,20,.42)}
 .slot-refit:disabled{opacity:.7}
 .slot-tile.empty{border-style:dashed;background:rgba(10,18,29,.55)}
 .slot-tile.empty .slot-name{color:var(--muted);font-weight:600}

@@ -547,7 +547,7 @@ function buildSheetHTML(system, slotIndex) {
     );
   });
   parts.push("</div>");
-  parts.push('<p class="sheet-note">You can construct in every open slot this turn, with or without free workers. Completed buildings always pay energy upkeep. Output scales with staffing: a half crew produces half the facility output. Workers follow the selected automatic strategy until you pin a crew on the colony screen; a pinned crew stays exactly where you put it. A new building is laid down at the level your Building category techs have unlocked; a building that was already standing keeps its old level until you refit it from its slot for half its build cost. Housing is not a building: open the population card to fund energy maintenance and housing investment as percentages of the full requirement.</p>');
+  parts.push('<p class="sheet-note">You can construct in every open slot this turn, with or without free workers. Completed buildings always pay energy upkeep. Output scales with staffing: a half crew produces half the facility output. Workers follow the selected automatic strategy until you pin a crew on the colony screen; a pinned crew stays exactly where you put it. A new building is laid down at the level your Building category techs have unlocked; a building that was already standing keeps its old level until the colony can support the minimum population of the new level and you refit it from its slot for half its build cost. Housing is not a building: open the population card to fund energy maintenance and housing investment as percentages of the full requirement.</p>');
   return parts.join("");
 }
 

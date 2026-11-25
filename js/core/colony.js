@@ -285,6 +285,27 @@ function adjustFacilityWorkersOrder(system, index, delta) {
   return { ok: true, reason: null, workers: next, plan: getWorkforcePlan(system) };
 }
 
+/* ---------- building refits ---------- */
+
+/* A refit promotes a standing building to the next researched level. Every
+   level has its own minimum colony population and a facility below that gate
+   produces nothing at all, so promoting a working Level 1 Mine onto a Level 2
+   gate the colony cannot meet would trade a producing building for a dead one.
+   The order is therefore refused until the colony grows: the old level stays
+   online and keeps its output. Support buildings (Lab, Embassy) have no gate
+   and always pass. */
+function getBuildingRefitPopulationReason(system, type, nextLevel) {
+  if (!system || !type) return null;
+  const required = getBuildingMinPopulation(type, nextLevel);
+  if (required <= 0) return null;
+  const population = getColonyPopulation(system);
+  if (population >= required) return null;
+  const def = BUILDINGS[type];
+  return (def ? def.name : "This building") + " level " + nextLevel +
+    " needs a colony of " + required + " population (this colony has " + population +
+    "). Grow the colony before refitting.";
+}
+
 /* ---------- slots, attention and colonization ---------- */
 
 function getEmptyUnlockedSlots(system) {

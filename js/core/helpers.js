@@ -730,7 +730,9 @@ function getStrongholdRadiusBonus() {
 /* Every building starts at level 1. A completed Building category tech
    raises the level it MAY be refitted to, up to the data file's maxLevel.
    Nothing upgrades by itself: the refit is a paid order on the colony
-   screen (see getBuildingUpgradeCost and game/actions.js upgradeBuilding). */
+   screen (see getBuildingUpgradeCost and game/actions.js upgradeBuilding),
+   and it must land on a level the colony's population already supports
+   (getBuildingRefitPopulationReason in core/colony.js). */
 function getBuildingMaxLevel(type) {
   const def = BUILDINGS[type];
   return def && typeof def.maxLevel === "number" ? def.maxLevel : 1;

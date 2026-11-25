@@ -43,7 +43,8 @@ function techRefitNote(tech, done) {
   if (!done) return "";
   if (tech.building && BUILDINGS[tech.building]) {
     return "Unlocked. A standing " + BUILDINGS[tech.building].name +
-      " keeps its old output until you refit it on the colony screen.";
+      " keeps its old output until you refit it on the colony screen, and the colony must" +
+      " already support the new level's minimum population.";
   }
   if (tech.shipType && SHIP_TYPES[tech.shipType]) {
     return "Unlocked. Standing " + SHIP_TYPES[tech.shipType].name +

@@ -62,7 +62,11 @@ function facilityCrewHTML(system, index, entry) {
 
 /* A tech never upgrades a standing building by itself. When a completed
    Building tech has unlocked a higher level, the slot grows this refit
-   button; it costs half the building's own build cost. */
+   button; it costs half the building's own build cost. The button stays
+   visible but disabled while the move is illegal: a short ledger, or a
+   colony below the population gate of the level the refit would reach. A
+   facility under its gate produces nothing, so that refit would switch a
+   working building off. */
 function buildingRefitHTML(system, index, slot) {
   const level = getBuildingLevel(slot);
   const unlocked = getBuildingUnlockedLevel(slot.type);
@@ -70,15 +74,28 @@ function buildingRefitHTML(system, index, slot) {
     return '<span class="slot-plus text-good" aria-hidden="true">✓</span>';
   }
   const def = BUILDINGS[slot.type];
+  const nextLevel = level + 1;
   const cost = getBuildingUpgradeCost(slot.type);
+  const sector = getSector(system.sectorId);
   const stock = getSectorStock(system.sectorId, "minerals");
   const affordable = stock >= cost.minerals;
+  const populationReason = getBuildingRefitPopulationReason(system, slot.type, nextLevel);
+  const ledgerReason = affordable ? "" :
+    "Need " + cost.minerals + " minerals in " + (sector ? sector.name : "this sector") +
+    " for the refit (" + formatAmount(Math.max(0, stock)) + " held).";
+  const reason = populationReason || ledgerReason;
+  const gated = !!populationReason;
+  const costLabel = gated
+    ? "L" + nextLevel + " · NEEDS " + getBuildingMinPopulation(slot.type, nextLevel) + " POP"
+    : "L" + nextLevel + " · " + cost.minerals + " ⛏";
   return (
-    '<button class="slot-refit' + (affordable ? "" : " short") + '" type="button"' +
-      ' data-upgrade-building="' + index + '"' + (affordable ? "" : " disabled") +
-      ' aria-label="Refit ' + def.name + ' to level ' + (level + 1) + ' for ' + cost.minerals + ' minerals">' +
+    '<button class="slot-refit' + (gated ? " gated" : affordable ? "" : " short") + '" type="button"' +
+      ' data-upgrade-building="' + index + '"' + (reason ? " disabled" : "") +
+      (reason ? ' title="' + reason + '"' : "") +
+      ' aria-label="Refit ' + def.name + ' to level ' + nextLevel + " for " + cost.minerals + " minerals" +
+      (reason ? " — " + reason : "") + '">' +
       '<span class="slot-refit-label">REFIT</span>' +
-      '<span class="slot-refit-cost">L' + (level + 1) + " · " + cost.minerals + " ⛏</span>" +
+      '<span class="slot-refit-cost">' + costLabel + "</span>" +
     "</button>"
   );
 }
@@ -1266,6 +1283,7 @@ function worldTabHTML(system, charted, row, col) {
       getBuildingWorkers("power", 3) + '/' + getBuildingWorkers("power", 4) +
       ' workers for ' + getBuildingOutput("power", 1).energy + '/' + getBuildingOutput("power", 2).energy + '/' +
       getBuildingOutput("power", 3).energy + '/' + getBuildingOutput("power", 4).energy + ' output. ' +
+      'A refit is refused while the colony is below the minimum population of the level it would reach, so a working facility is never switched off by an upgrade. ' +
       'Use the − / + crew buttons on a facility to pin its workers; without orders the colony follows its automatic crew strategy (round robin by default). ' +
       'Tap the population card to fund energy maintenance and housing investment as percentages of the full requirement. ' +
       'Population maintenance is paid first, then colony overhead and building upkeep. Colony overhead: ' +

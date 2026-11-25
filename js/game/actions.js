@@ -102,7 +102,12 @@ function unlockPlanetSlot(systemId, slotIndex) {
 
 /* A completed tech only raises the level a building MAY be refitted to.
    This order is the only thing that changes a standing building, and it is
-   priced at half the building's own build cost, paid by its sector. */
+   priced at half the building's own build cost, paid by its sector.
+   The refit is refused while the colony is below the population gate of the
+   level it would land on: a facility under that gate produces nothing, and
+   the player would lose a working building for a dead one. The current level
+   keeps producing until the colony grows (js/core/colony.js
+   getBuildingRefitPopulationReason). */
 function upgradeBuilding(systemId, slotIndex) {
   if (state.phase !== "actions") return false;
   const system = getSystem(systemId);
@@ -115,6 +120,12 @@ function upgradeBuilding(systemId, slotIndex) {
   const unlocked = getBuildingUnlockedLevel(slot.type);
   if (level >= unlocked) {
     toast("No researched refit is waiting for this " + def.name + ".");
+    renderAll();
+    return false;
+  }
+  const populationReason = getBuildingRefitPopulationReason(system, slot.type, level + 1);
+  if (populationReason) {
+    toast(populationReason);
     renderAll();
     return false;
   }

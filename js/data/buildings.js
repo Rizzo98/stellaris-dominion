@@ -16,7 +16,11 @@
    Levels: every building starts at level 1. A completed Building category
    tech raises the level the building MAY be refitted to (2, 3 and 4). The
    refit is a manual order paid on the colony screen: a tech never upgrades a
-   standing building by itself.
+   standing building by itself. A facility level also carries a minimum colony
+   population, and the refit is refused while the colony is below the gate of
+   the level it would reach, so a working building is never promoted into a
+   blocked (zero-output) level. The rule lives in core/colony.js
+   (getBuildingRefitPopulationReason).
    ============================================================ */
 
 const FACILITY_LEVELS = CONFIG.economy.facilities.levels;

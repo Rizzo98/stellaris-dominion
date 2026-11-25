@@ -55,8 +55,8 @@ const TECH_CATEGORIES = [
 const TECH_CATEGORY_ORDER = ["building", "military", "trade"];
 
 const TECH_GROUPS = {
-  mine: { id: "mine", category: "building", name: "Mine", emoji: "⛏️", hint: "Refit a standing Mine on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker." },
-  power: { id: "power", category: "building", name: "Power Plant", emoji: "🏭", hint: "Refit a standing Power Plant on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker." },
+  mine: { id: "mine", category: "building", name: "Mine", emoji: "⛏️", hint: "Refit a standing Mine on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker; the refit waits until the colony reaches that population." },
+  power: { id: "power", category: "building", name: "Power Plant", emoji: "🏭", hint: "Refit a standing Power Plant on its colony slot. Higher levels need a larger minimum population but are far more efficient per worker; the refit waits until the colony reaches that population." },
   lab: { id: "lab", category: "building", name: "Lab", emoji: "🔬", hint: "Refit a standing Lab on its colony slot." },
   embassy: { id: "embassy", category: "building", name: "Embassy", emoji: "🏛️", hint: "Refit a standing Embassy on its colony slot." },
 
