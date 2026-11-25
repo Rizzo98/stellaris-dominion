@@ -1,0 +1,284 @@
+/* ============================================================
+   GITHUB WINDOW — PUSH TO REMOTE and REPORT
+   One centred window on desktop and a bottom sheet on phones. The window
+   covers the debug console (z-index 128) and sits below the toast (130), so a
+   confirmation toast stays visible above it.
+   ============================================================ */
+
+#github-layer{
+  position:fixed;inset:0;z-index:129;
+  display:flex;align-items:center;justify-content:center;
+  padding:18px 14px calc(18px + env(safe-area-inset-bottom));
+}
+.github-backdrop{
+  position:absolute;inset:0;
+  background:rgba(2,6,12,.8);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+}
+.github-window{
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;
+  width:min(100%,470px);max-height:min(88vh,780px);max-height:min(88dvh,780px);
+  border:1px solid var(--line-bright);border-radius:18px;
+  background:
+    radial-gradient(circle at 85% 0%,rgba(75,119,163,.16),transparent 42%),
+    linear-gradient(160deg,#0d1727,#080e18);
+  box-shadow:0 26px 90px rgba(0,0,0,.62);
+  overflow:hidden;
+  animation:githubIn .2s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes githubIn{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
+
+/* ---------- header ---------- */
+.github-head{
+  flex:0 0 auto;
+  display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+  padding:14px 16px 11px;
+  border-bottom:1px solid rgba(45,65,88,.55);
+  background:rgba(8,14,24,.72);
+}
+.github-head-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.github-head-main .kicker{
+  color:var(--blue);font-size:6.6px;letter-spacing:.12em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.github-head h2{font-size:18px;font-weight:800;letter-spacing:-.025em;line-height:1.2}
+.github-close{
+  width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:50%;border:1px solid var(--line);color:var(--muted);
+  background:rgba(19,31,47,.8);font-size:18px;line-height:1;
+}
+.github-close:disabled{opacity:.4}
+
+/* ---------- scroll body ---------- */
+.github-scroll{
+  flex:1 1 auto;min-height:0;
+  overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scrollbar-color:var(--line-bright) transparent;
+}
+.github-body{padding:13px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.github-form{display:flex;flex-direction:column;gap:11px;margin:0}
+
+/* ---------- footer ---------- */
+.github-foot{
+  flex:0 0 auto;
+  display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:8px;
+  padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);
+  background:rgba(7,12,20,.94);
+}
+.github-foot .primary-btn{
+  width:100%;min-height:42px;font-size:9px;padding:0 8px;letter-spacing:.02em;
+}
+.github-foot .secondary-btn{width:100%;min-height:42px;font-size:8px}
+.github-success-close{grid-column:1 / -1}
+
+/* ---------- push hero ---------- */
+.github-hero{
+  display:flex;align-items:center;gap:10px;
+  padding:10px;border:1px solid rgba(124,184,255,.22);border-radius:12px;
+  background:linear-gradient(135deg,rgba(23,44,71,.65),rgba(12,22,37,.7));
+}
+.github-hero-icon{
+  width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:10px;border:1px solid rgba(124,184,255,.3);
+  background:rgba(124,184,255,.12);color:var(--blue);
+  font-size:17px;font-weight:800;
+}
+.github-hero-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.github-hero-copy b{font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;color:var(--text)}
+.github-hero-copy small{font-size:8.5px;line-height:1.45;color:var(--muted)}
+
+/* ---------- facts ---------- */
+.github-facts{
+  display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:11px;overflow:hidden;
+  background:rgba(7,14,24,.55);
+}
+.github-fact{
+  display:grid;grid-template-columns:74px minmax(0,1fr);gap:8px;align-items:start;
+  padding:6px 9px;
+  border-bottom:1px solid rgba(34,49,72,.55);
+  font-family:var(--mono);font-size:7px;line-height:1.45;
+}
+.github-fact:last-child{border-bottom:0}
+.github-fact span{color:var(--faint);letter-spacing:.06em;font-weight:700}
+.github-fact b{color:var(--text);font-weight:650;overflow-wrap:anywhere}
+
+/* ---------- sign-in ---------- */
+.github-credentials{
+  display:flex;flex-direction:column;gap:8px;
+  padding:10px;border:1px solid var(--line);border-radius:12px;
+  background:rgba(8,15,26,.7);
+}
+.github-credentials-head{
+  display:flex;justify-content:space-between;gap:8px;
+  font-family:var(--mono);font-size:6.4px;font-weight:750;letter-spacing:.08em;
+  color:var(--faint);
+}
+.github-credentials-head span:last-child{color:var(--cyan)}
+.github-field{display:flex;flex-direction:column;gap:4px}
+.github-field > span:first-child{
+  font-family:var(--mono);font-size:6.5px;font-weight:750;letter-spacing:.08em;color:var(--faint);
+}
+.github-field input,
+.github-field textarea{
+  width:100%;
+  border:1px solid var(--line);border-radius:9px;
+  background:rgba(4,9,16,.85);color:var(--text);
+  font-family:var(--mono);font-size:10px;line-height:1.5;padding:9px 10px;
+  outline:none;user-select:text;-webkit-user-select:text;
+  transition:border-color .15s ease,box-shadow .15s ease;
+}
+.github-field input:focus,
+.github-field textarea:focus{
+  border-color:rgba(103,232,213,.55);
+  box-shadow:0 0 0 2px rgba(103,232,213,.1);
+}
+.github-field input:disabled,
+.github-field textarea:disabled{opacity:.55}
+.github-field textarea{
+  min-height:132px;resize:vertical;
+  font-family:var(--sans);font-size:11px;line-height:1.55;
+}
+.github-field input::placeholder,
+.github-field textarea::placeholder{color:var(--faint)}
+.github-token-wrap{position:relative;display:block}
+.github-token-wrap input{padding-right:58px}
+.github-token-toggle{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  min-height:26px;padding:0 8px;
+  border:1px solid var(--line-bright);border-radius:6px;
+  background:rgba(19,32,49,.9);
+  font-family:var(--mono);font-size:6.4px;font-weight:750;letter-spacing:.06em;color:var(--muted);
+}
+.github-token-toggle:active{transform:translateY(-50%) scale(.97)}
+.github-token-toggle:disabled{opacity:.4}
+
+/* ---------- signed-in card ---------- */
+.github-user{
+  display:flex;align-items:center;gap:9px;
+  padding:9px 10px;border:1px solid rgba(103,232,213,.3);border-radius:11px;
+  background:rgba(15,38,38,.38);
+}
+.github-user-mark{
+  width:28px;height:28px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:50%;border:1px solid rgba(103,232,213,.4);
+  background:rgba(103,232,213,.1);color:var(--cyan);
+  font-family:var(--mono);font-size:13px;font-weight:800;
+}
+.github-user-copy{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.github-user-copy b{
+  font-family:var(--mono);font-size:10px;color:var(--text);letter-spacing:.02em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.github-user-copy small{font-size:7.5px;color:var(--faint)}
+.github-mini{
+  flex:0 0 auto;min-height:26px;padding:0 8px;
+  border:1px solid var(--line-bright);border-radius:7px;
+  background:rgba(19,32,49,.8);
+  font-family:var(--mono);font-size:6.4px;font-weight:750;letter-spacing:.05em;color:var(--muted);
+}
+.github-mini:disabled{opacity:.4}
+
+/* ---------- report form ---------- */
+.github-title-row{
+  display:flex;align-items:baseline;gap:8px;padding:0 1px;
+  font-family:var(--mono);font-size:6.4px;letter-spacing:.06em;color:var(--faint);
+}
+.github-title-row > span{flex:0 0 auto}
+.github-title-row b{
+  flex:1 1 auto;min-width:0;
+  font-size:7.2px;font-weight:650;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.github-title-row small{flex:0 0 auto;font-size:6.2px;color:var(--faint)}
+.github-check{
+  display:flex;align-items:flex-start;gap:7px;
+  padding:2px 1px;
+  font-size:8.5px;line-height:1.45;color:var(--muted);
+}
+.github-check input{
+  appearance:none;-webkit-appearance:none;
+  width:15px;height:15px;flex:0 0 auto;margin:1px 0 0;
+  border:1px solid var(--line-bright);border-radius:4px;
+  background:rgba(4,9,16,.85);position:relative;cursor:pointer;
+}
+.github-check input:checked{
+  border-color:rgba(103,232,213,.6);
+  background:rgba(103,232,213,.16);
+}
+.github-check input:checked::after{
+  content:"✓";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:10px;font-weight:800;color:var(--cyan);
+}
+
+/* ---------- notes / errors / links ---------- */
+.github-note{
+  margin:0;font-family:var(--sans);font-size:8.5px;line-height:1.55;color:var(--faint);
+}
+.github-note b{color:var(--muted);font-weight:700}
+.github-inline-link{
+  color:var(--cyan);text-decoration:none;
+  border-bottom:1px dotted rgba(103,232,213,.45);
+}
+.github-error{
+  border:1px solid rgba(255,122,122,.45);border-radius:10px;
+  padding:8px 10px;background:rgba(64,20,27,.5);
+  color:#ffc9c9;font-size:9px;line-height:1.5;
+}
+.github-link{
+  font-family:var(--mono);font-size:7px;font-weight:750;letter-spacing:.05em;
+  color:var(--cyan);text-decoration:none;
+  border:1px solid rgba(103,232,213,.25);border-radius:99px;
+  padding:5px 9px;background:rgba(15,38,38,.4);
+}
+.github-link:hover{border-color:rgba(103,232,213,.55)}
+
+/* ---------- success ---------- */
+.github-success{
+  display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;
+  padding:20px 8px 10px;
+}
+.github-success-icon{
+  width:48px;height:48px;display:grid;place-items:center;
+  border-radius:50%;border:1px solid rgba(103,232,213,.45);
+  background:rgba(103,232,213,.1);color:var(--cyan);
+  font-size:22px;font-weight:800;
+  box-shadow:0 0 30px rgba(103,232,213,.12);
+}
+.github-success h3{
+  font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.12em;color:var(--cyan);
+}
+.github-success-copy{font-size:10px;line-height:1.55;color:var(--muted)}
+.github-success-copy b{color:var(--text)}
+.github-success-links{display:flex;flex-wrap:wrap;justify-content:center;gap:7px 12px}
+.github-success .github-note{max-width:330px;font-size:8px}
+
+/* ---------- phones: bottom sheet ---------- */
+@media (max-width:420px){
+  #github-layer{
+    align-items:flex-end;
+    padding:0;
+  }
+  .github-window{
+    width:100%;max-height:92vh;max-height:92dvh;
+    border-radius:18px 18px 0 0;border-bottom:0;
+    animation-name:githubUp;
+  }
+  .github-head{padding-left:14px;padding-right:14px}
+  .github-body{padding-left:14px;padding-right:14px}
+  .github-foot{padding-left:14px;padding-right:14px}
+}
+@keyframes githubUp{from{transform:translateY(100%)}to{transform:none}}
+
+@media (max-width:360px){
+  .github-head h2{font-size:16px}
+  .github-fact{grid-template-columns:62px minmax(0,1fr);font-size:6.6px}
+  .github-foot{grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .github-window{animation:none}
+}

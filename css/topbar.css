@@ -125,7 +125,8 @@
 }
 .event-chip:active{transform:scale(.97)}
 .event-chip .event-chip-emoji{font-size:8px;line-height:1}
-.save-chip{
+.save-chip,
+.report-chip{
   display:inline-flex;align-items:center;gap:3px;
   border:1px solid rgba(244,201,107,.3);border-radius:6px;
   padding:2px 5px;
@@ -134,10 +135,19 @@
   color:var(--gold);white-space:nowrap;
   transition:border-color .15s ease,background .15s ease;
 }
-.save-chip:active{transform:scale(.97)}
-.save-chip .save-chip-emoji{font-size:8px;line-height:1}
+.save-chip:active,
+.report-chip:active{transform:scale(.97)}
+.save-chip .save-chip-emoji,
+.report-chip .report-chip-emoji{font-size:8px;line-height:1}
+/* The bug report sits beside SAVE: same capsule, a wire-dispatch blue. */
+.report-chip{
+  border-color:rgba(124,184,255,.3);
+  background:rgba(18,31,50,.6);
+  color:var(--blue);
+}
 @media (max-width:360px){
-  .save-chip .save-chip-label{display:none}
+  .save-chip .save-chip-label,
+  .report-chip .report-chip-label{display:none}
 }
 
 /* ---------- rival threat chip ---------- */

@@ -16,6 +16,12 @@
    field existed still loads with a complete rulebook. Unknown keys in a save
    are kept; wrong-typed values fall back to the default.
 
+   The optional js/data/standard-rules.js ships the published standard: it is
+   applied over the in-code tables before RUN_RULE_DEFAULTS is captured, so a
+   published rulebook becomes the default for RESET, the tweak counter and new
+   matches. adoptRunStandard() makes a freshly pushed rulebook the standard of
+   the running page without a reload.
+
    Shape:
      { version,
        config:    deep clone of CONFIG,
@@ -321,7 +327,28 @@ function captureRunRules() {
   };
 }
 
-/* Defaults are captured once, before any debug edit can touch a global. */
+/* Defaults are captured once, before any debug edit can touch a global.
+   A published standard (js/data/standard-rules.js) is applied over the code
+   tables first: it is the new baseline, not a per-match override. */
+const RUN_CODE_DEFAULTS = captureRunRules();
+const RUN_STANDARD_SOURCE = typeof STANDARD_RULES !== "undefined" && isRuleObject(STANDARD_RULES)
+  ? STANDARD_RULES
+  : null;
+let RUN_STANDARD_META = typeof STANDARD_RULES_META !== "undefined" && isRuleObject(STANDARD_RULES_META)
+  ? cloneRuleValue(STANDARD_RULES_META)
+  : null;
+let RUN_STANDARD_ACTIVE = !!RUN_STANDARD_SOURCE;
+
+if (RUN_STANDARD_SOURCE) {
+  const standard = mergeRuleDefaults(RUN_CODE_DEFAULTS, RUN_STANDARD_SOURCE);
+  preserveEventTurnGates(standard, RUN_STANDARD_SOURCE);
+  ensureRuleListValue(standard, RUN_CODE_DEFAULTS, "config.economy.facilities.levels");
+  ensureRuleListValue(standard, RUN_CODE_DEFAULTS, "config.economy.happinessTiers");
+  ensureRuleListValue(standard, RUN_CODE_DEFAULTS, "config.planetSlots.sizes");
+  standard.version = RUN_RULES_VERSION;
+  applyRulebookSnapshot(standard);
+}
+
 const RUN_RULE_DEFAULTS = captureRunRules();
 
 /* minTurn / maxTurn are nullable: null means 'no gate'. The generic merge
@@ -344,13 +371,17 @@ function preserveEventTurnGates(merged, incoming) {
 /* A rulebook with no facility levels, happiness tiers or planet sizes cannot
    run the game. That is only reachable through a hand-edited save (the UI keeps
    at least one row), but the fallback is cheap and keeps a bad file loadable. */
-function ensureRuleList(rules, path) {
+function ensureRuleListValue(rules, defaults, path) {
   const list = getRulePathValue(rules, path);
   if (Array.isArray(list) && list.length) return;
-  const fallback = getRulePathValue(RUN_RULE_DEFAULTS, path);
+  const fallback = getRulePathValue(defaults, path);
   if (Array.isArray(fallback) && fallback.length) {
     setRulePathValue(rules, path, cloneRuleValue(fallback));
   }
+}
+
+function ensureRuleList(rules, path) {
+  ensureRuleListValue(rules, RUN_RULE_DEFAULTS, path);
 }
 
 function normalizeRunRules(saved) {
@@ -365,18 +396,45 @@ function normalizeRunRules(saved) {
   return merged;
 }
 
-function applyRunRules(saved) {
-  const rules = normalizeRunRules(saved);
-  replaceRuleValue(CONFIG, rules.config);
+/* Write a complete rulebook into the live globals. The boot pass for a
+   published standard runs before RUN_RULE_DEFAULTS exists, so this helper
+   cannot normalise; applyRunRules() reuses it after normalising a save. */
+function applyRulebookSnapshot(rules) {
+  replaceRuleValue(CONFIG, rules.config || {});
   RUN_CONTENT_SOURCES.forEach(function (source) {
     applyRuleEntries(source.target(), rules.content && rules.content[source.key], source.skip);
   });
-  applyRunEventRules(rules.events);
+  applyRunEventRules(rules.events || {});
+}
+
+function applyRunRules(saved) {
+  const rules = normalizeRunRules(saved);
+  applyRulebookSnapshot(rules);
   return rules;
 }
 
 function resetRunRules() {
   return applyRunRules(cloneRuleValue(RUN_RULE_DEFAULTS));
+}
+
+/* A successful PUSH TO REMOTE makes the published rulebook the standard of
+   the running page without a reload: RESET returns to it and the tweak
+   counter drops to zero. The committed js/data/standard-rules.js takes over
+   on the next page load. */
+function adoptRunStandard(rules, meta) {
+  const normalized = normalizeRunRules(rules);
+  replaceRuleValue(RUN_RULE_DEFAULTS, normalized);
+  RUN_STANDARD_META = isRuleObject(meta) ? cloneRuleValue(meta) : null;
+  RUN_STANDARD_ACTIVE = true;
+  return RUN_RULE_DEFAULTS;
+}
+
+function getRunStandardMeta() {
+  return RUN_STANDARD_META ? cloneRuleValue(RUN_STANDARD_META) : null;
+}
+
+function isRunStandardActive() {
+  return RUN_STANDARD_ACTIVE;
 }
 
 /* A read-only view of the live rulebook for counting. It references the live

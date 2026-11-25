@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="css/event.css">
 <link rel="stylesheet" href="css/screens.css">
 <link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/github.css">
 <link rel="stylesheet" href="css/utilities.css">
 </head>
 <body>
@@ -36,6 +37,10 @@
         <button class="save-chip hidden" id="save-chip" type="button" aria-label="Save or load this run" title="Save / load">
           <span class="save-chip-emoji" aria-hidden="true">💾</span>
           <span class="save-chip-label">SAVE</span>
+        </button>
+        <button class="report-chip hidden" id="report-chip" type="button" aria-label="Report a problem on GitHub" title="Report a problem">
+          <span class="report-chip-emoji" aria-hidden="true">🐞</span>
+          <span class="report-chip-label">REPORT</span>
         </button>
         <span id="turn-label">TURN 1</span>
       </span>
@@ -419,7 +424,11 @@
     <div class="debug-body" id="debug-body"></div>
   </div>
   <footer class="debug-foot">
-    <button class="primary-btn" id="debug-done" type="button">DONE</button>
+    <div class="debug-standard" id="debug-standard">STANDARD · IN-CODE DEFAULTS</div>
+    <div class="debug-foot-actions">
+      <button class="debug-push-btn" id="debug-push" type="button" data-debug-push>⇧ PUSH TO REMOTE</button>
+      <button class="primary-btn" id="debug-done" type="button">DONE</button>
+    </div>
   </footer>
 </section>
 
@@ -442,6 +451,24 @@
   </div>
 </section>
 
+<!-- GITHUB WINDOW: PUSH TO REMOTE / REPORT -->
+<div id="github-layer" class="hidden" aria-hidden="true">
+  <div class="github-backdrop" id="github-backdrop"></div>
+  <section class="github-window" id="github-window" role="dialog" aria-modal="true" aria-labelledby="github-title">
+    <header class="github-head">
+      <div class="github-head-main">
+        <span class="kicker" id="github-kicker">REPOSITORY</span>
+        <h2 id="github-title">Push to remote</h2>
+      </div>
+      <button class="github-close" id="github-close" type="button" aria-label="Close" data-github-close>×</button>
+    </header>
+    <div class="github-scroll">
+      <div class="github-body" id="github-body"></div>
+    </div>
+    <footer class="github-foot" id="github-foot"></footer>
+  </section>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="save-file-input" accept=".json,application/json" hidden>
 
@@ -459,6 +486,7 @@
 <script src="js/data/resources.js"></script>
 <script src="js/data/systems.js"></script>
 <script src="js/data/debug-schema.js"></script>
+<script src="js/data/standard-rules.js"></script>
 <script src="js/core/rng.js"></script>
 <script src="js/core/galaxy.js"></script>
 <script src="js/core/state.js"></script>
@@ -476,9 +504,11 @@
 <script src="js/core/trade.js"></script>
 <script src="js/core/economy.js"></script>
 <script src="js/core/save.js"></script>
+<script src="js/core/github.js"></script>
 <script src="js/ui/dom.js"></script>
 <script src="js/ui/start-screen.js"></script>
 <script src="js/ui/debug-screen.js"></script>
+<script src="js/ui/github-modal.js"></script>
 <script src="js/ui/topbar.js"></script>
 <script src="js/ui/map.js"></script>
 <script src="js/ui/galaxy-view.js"></script>
@@ -501,6 +531,7 @@
 <script src="js/game/swipe.js"></script>
 <script src="js/game/turn.js"></script>
 <script src="js/game/save-actions.js"></script>
+<script src="js/game/github-actions.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

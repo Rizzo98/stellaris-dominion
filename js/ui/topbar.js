@@ -34,12 +34,13 @@ function renderThreatChip() {
     (sector ? sector.name : "this sector") + ". Open the Empire tab for details.");
 }
 
-/* The save slot opens from the top bar. The event overlay and the end-turn
-   animation own the screen at other moments, so the chip is only offered on
-   a playable turn. */
+/* The save slot and the report window open from the top bar. The event
+   overlay and the end-turn animation own the screen at other moments, so both
+   chips are only offered on a playable turn. */
 function renderSaveChip() {
-  if (!els.saveChip) return;
-  els.saveChip.classList.toggle("hidden", state.phase !== "actions");
+  const playable = state.phase === "actions";
+  if (els.saveChip) els.saveChip.classList.toggle("hidden", !playable);
+  if (els.reportChip) els.reportChip.classList.toggle("hidden", !playable);
 }
 
 function renderTopbar() {

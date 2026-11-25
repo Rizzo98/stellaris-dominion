@@ -314,6 +314,41 @@ function renderDebugContext() {
     '<span class="debug-context-count' + (overrides ? " custom" : "") + '">' +
       (overrides ? overrides + (overrides === 1 ? " TWEAK" : " TWEAKS") : "DEFAULT RULES") +
     "</span>";
+  renderDebugStandard(overrides);
+}
+
+function formatDebugStandardDate(iso) {
+  const date = new Date(iso);
+  if (!date || !isFinite(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+/* The footer says which rulebook RESET returns to. A pushed standard is a
+   repo file (js/data/standard-rules.js); until one exists, the in-code tables
+   are the standard. The count is the same walk the context strip uses. */
+function renderDebugStandard(overrides) {
+  if (!els.debugStandard) return;
+  const count = typeof overrides === "number" ? overrides : countRuleOverrides();
+  const meta = typeof getRunStandardMeta === "function" ? getRunStandardMeta() : null;
+  const parts = [];
+  if (meta && meta.pushedBy) {
+    parts.push("STANDARD · @" + meta.pushedBy);
+    if (meta.pushedAt) parts.push(formatDebugStandardDate(meta.pushedAt));
+  } else if (typeof isRunStandardActive === "function" && isRunStandardActive()) {
+    parts.push("STANDARD · PUBLISHED");
+  } else {
+    parts.push("STANDARD · IN-CODE DEFAULTS");
+  }
+  if (count > 0) {
+    parts.push(count + (count === 1 ? " TWEAK" : " TWEAKS") + " UNPUBLISHED");
+  } else if (meta || (typeof isRunStandardActive === "function" && isRunStandardActive())) {
+    parts.push("UP TO DATE");
+  }
+  els.debugStandard.textContent = parts.join(" · ");
+  els.debugStandard.setAttribute("title",
+    meta && meta.pushedAt
+      ? "Published by @" + meta.pushedBy + " on " + meta.pushedAt
+      : "The standard is the rulebook in the repository's js/data/standard-rules.js, or the in-code tables until one is published.");
 }
 
 function renderDebugScreen() {
@@ -1238,6 +1273,11 @@ function handleDebugScreenClick(event) {
   const target = event.target;
   if (!target || !target.closest) return;
 
+  const pushButton = target.closest("[data-debug-push]");
+  if (pushButton) {
+    if (typeof openGithubPushModal === "function") openGithubPushModal();
+    return;
+  }
   const tabButton = target.closest("[data-debug-tab]");
   if (tabButton) {
     setDebugTab(tabButton.getAttribute("data-debug-tab"));

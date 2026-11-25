@@ -29,9 +29,21 @@ function bindEvents() {
 
   // Save / load: topbar chip, start-screen continue and the shared file picker.
   if (els.saveChip) els.saveChip.addEventListener("click", openSaveSheet);
+  if (els.reportChip) els.reportChip.addEventListener("click", openGithubReportModal);
   if (els.continueSave) els.continueSave.addEventListener("click", continueSavedGame);
   if (els.loadSaveStart) els.loadSaveStart.addEventListener("click", requestSaveFileLoad);
   if (els.saveFileInput) els.saveFileInput.addEventListener("change", handleSaveFileSelection);
+
+  // GitHub window: push/sign-in form, report form and the delegated controls.
+  if (els.githubLayer) {
+    els.githubLayer.addEventListener("click", handleGithubModalClick);
+    els.githubLayer.addEventListener("keydown", trapGithubModalFocus);
+    if (els.githubBody) {
+      els.githubBody.addEventListener("submit", handleGithubModalSubmit);
+      els.githubBody.addEventListener("input", handleGithubModalInput);
+      els.githubBody.addEventListener("change", handleGithubModalChange);
+    }
+  }
 
   // Bottom tabs + end turn.
   document.querySelectorAll(".nav-tab[data-tab]").forEach(function (button) {
@@ -391,6 +403,10 @@ function bindEvents() {
   // Escape closes the layer menu first, then the debug sandbox, then sheets.
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Escape") return;
+    if (typeof isGithubModalOpen === "function" && isGithubModalOpen()) {
+      if (!isGithubModalPending()) closeGithubModal();
+      return;
+    }
     if (els.debugScreen && !els.debugScreen.classList.contains("hidden")) {
       closeDebugScreen();
       return;

@@ -40,6 +40,8 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 
 **Debug menu pass:** the launch screen is now a **home page** with **START A NEW GAME** and **CONTINUE**. START A NEW GAME opens the setup page with the one-tap ethics picker, the seed field and a **DEBUG SETTINGS** button that opens a six-tab rule sandbox. Every `CONFIG` leaf, event card, deck bucket, hull, building, structure, survey site, origin and tech price is editable in place; the **Economy** tab prints the live colony equations with a sample-colony preview and the **Events** tab lists every card with its odds, unlock turns, category and deck membership. Rules apply to the match being started, can be edited mid-run from the SAVE sheet, and now travel with the save file (format v3). See **Home page and debug settings** below.
 
+**Remote settings and report pass:** the debug console's footer now has **⇧ PUSH TO REMOTE**. It commits the whole live rulebook to `js/data/standard-rules.js` on the repository's `main` branch through the GitHub Contents API, and the game loads that file as its default rulebook on the next page load of the deployed site (or after a `git pull` in a local clone). The top bar gained a **REPORT** chip beside **SAVE**: it opens a free-text window that files a public GitHub issue with the turn, seed, origin, stability and the current rulebook attached. Both windows ask for a GitHub username and a **personal access token** (not the account password), call `api.github.com` directly from the browser, and keep the token in page memory only. See **Publishing settings and filing reports** below.
+
 ## Rival empires, patrols and strongholds
 
 - **Seeded rivals** — galaxy generation calls `createRivalEmpires()`. The count (5–7), spawn sectors, names, archetypes and starting fleets come from a seeded stream that is independent of the event deck. Every ring gets one spawn before extra empires are placed, so the same seed always produces the same powers.
@@ -146,7 +148,22 @@ The original prototype is untouched at [`../index.html`](../index.html) and rema
 - **Live runs vs generation** — values that are read every turn (upkeep, base income, growth, maintenance, military rules, event weights, content stats) apply immediately. Values baked when a galaxy is generated (seed, ring count, sector geometry, survey density, starting stockpile/population, planet sizes, rival spawn count) are locked in a live run and tagged **NEXT MATCH ONLY**; edit them on the setup page. A live **Galaxy** tab still explains why.
 - **Saved with the match** — the snapshot carries a top-level `rules` object (see **Saving and loading**), so two matches can play with different economies, decks and content. **CONTINUE** shows the tweak count. **PLAY AGAIN** resets the rulebook to its defaults but keeps the seed for a retry.
 - **Reset** — the header **RESET** asks for a second tap, then restores every balance table, the event deck and the content stats. On the setup page it also restores the seed and the context count returns to **DEFAULT RULES**; in a live run the sector geometry, planet-size table and seed are kept so the open galaxy keeps its shape and can still be rendered.
+- **Publish** — the footer's **⇧ PUSH TO REMOTE** commits the whole rulebook as the repository's standard. The status line above it names the current standard (`IN-CODE DEFAULTS`, `@user · date` or `PUBLISHED`) and how many tweaks are still unpublished; **UP TO DATE** means the live rules already match the standard. See **Publishing settings and filing reports** below.
 - **Code** — `js/core/run-rules.js` captures, normalises, applies and resets the rulebook; `js/data/debug-schema.js` holds tabs and field metadata; `js/ui/debug-screen.js` renders the console; `css/debug.css` styles it. The setup/menu pages live in `index.html`, `js/ui/start-screen.js` and `css/screens.css`.
+
+## Publishing settings and filing reports
+
+Both writes are browser-to-GitHub calls: the app is still static, has no backend, and needs no build step or dependency. GitHub's REST API sends `access-control-allow-origin: *` and accepts `Authorization`, so a page served from GitHub Pages or localhost can call it directly. The target is one constant block, `GITHUB_TARGET` in `js/core/github.js`: **Rizzo98/stellaris-dominion**, branch **main**, file **js/data/standard-rules.js**. A fork changes those four values.
+
+- **PUSH TO REMOTE** — open SAVE → **OPEN DEBUG SETTINGS**, then press **⇧ PUSH TO REMOTE** in the console footer (the setup page's DEBUG SETTINGS opens the same console). The window shows the repository, file, branch, current standard, the number of tweaks since that standard and whether the source is a live run or a new match. Submitting signs in, reads the file's current blob SHA, and commits the pretty-printed rulebook with a generated message (`Publish settings standard · N tweaks · turn T`) through `PUT /repos/{owner}/{repo}/contents/{path}`.
+- **What a push publishes** — the whole captured rulebook, exactly like a save file's `rules` object: every `CONFIG` leaf, the event deck (category weights, card weights/enables/unlock turns, buckets and unrest cards) and the content tables (hulls, structures, buildings, survey sites, archetypes, origins, planet types and tech prices/payloads). That includes generation settings such as the seed, ring count, sector geometry and planet sizes; the window says so before committing.
+- **How the standard becomes the default** — `index.html` loads `js/data/standard-rules.js` after the data tables and before `js/core/run-rules.js`. The generated file declares `STANDARD_RULES_META` and `STANDARD_RULES`; run-rules merges it over the in-code tables and applies it **before** it captures `RUN_RULE_DEFAULTS`. From then on **RESET**, the debug tweak count and every new match use the published values. `adoptRunStandard()` makes a freshly pushed rulebook the standard of the running tab without a reload, so RESET and **UP TO DATE** follow the push immediately.
+- **The open match is unaffected** — a push writes the repository file; the live tables already contain those values, so nothing in the running galaxy changes. The next page load picks the standard up (this tab immediately, other browsers after GitHub Pages deploys the commit and a reload, a local clone after `git pull`). GitHub Pages can cache the script for a few minutes. Because the game loads the standard as a **classic script**, a malformed file only logs a script error: `STANDARD_RULES` stays undefined and run-rules falls back to the in-code tables instead of bricking the app.
+- **REPORT** — the **🐞 REPORT** chip sits beside **SAVE** and is shown on a playable turn, like SAVE. It opens a window with a free-text field (up to 60,000 characters), a live preview of the issue title (the first non-empty line, prefixed `[REPORT]`, clipped to 70 characters) and a switch that attaches the current rulebook as a collapsed `<details>` block. The issue body also carries the turn, galaxy seed, origin, colony count, stability, current sector, rule-tweak count, current settings standard, build label, browser user agent, reporter and timestamp. Submitting creates the issue with `POST /repos/{owner}/{repo}/issues`. The full body is capped at GitHub's 65,000-character issue limit; an oversized rulebook is omitted with a note rather than making the report fail.
+- **Sign-in** — both windows ask for a **GitHub username** and a **personal access token (PAT)**, never the account password. The token is checked with `GET /user`, and the typed username must match the token owner; the returned login is the one shown and written into the commit metadata. The token is sent only to `https://api.github.com` as a Bearer token, held in this tab's memory for the session, removed by **SIGN OUT** or a reload, and never written into `localStorage` or a save file. A report never contains it.
+- **Token permissions** — a fine-grained token scoped to this repository needs **Contents: Read and write** to push and **Issues: Read and write** to report. A classic token needs `repo` (or `public_repo` for this public repository). Write permission is also the limit on who can publish: a visitor without it gets a permission error, and branch protection or a missing token can block the direct commit to `main`.
+- **Errors** — the window keeps the form and prints the reason inline: 401 (bad token), 403 (missing scope or exhausted rate limit), 404 (repository or file not visible to the token), 409 (the file changed during the push), 422 (GitHub validation), network failure and the 25-second timeout. Nothing is retried silently and the submit button is disabled while a request is in flight.
+- **Code map** — `js/core/github.js` (target, session, API client, standard-file and report builders), `js/ui/github-modal.js` (window, sign-in card, success/error views and delegated controls), `js/game/github-actions.js` (submit flow, facts and adoption), `js/data/standard-rules.js` (the published standard), `js/core/run-rules.js` (boot application and `adoptRunStandard`), `css/github.css` (window), `css/topbar.css` (REPORT chip), `css/debug.css` (footer) and `index.html` (markup and script tags).
 
 ## Saving and loading
 
@@ -185,6 +202,8 @@ Classic scripts are used on purpose (not ES modules) so that opening `index.html
 
 Browser saves use `localStorage`; the run archive also downloads and loads a plain `.json` save file, so saving needs no build step, backend or database.
 
+The two GitHub windows need a network connection and call `https://api.github.com` directly. Opening `index.html` from the filesystem still runs the game, but serve the folder over HTTP when trying **PUSH TO REMOTE** or **REPORT** (some browsers restrict cross-origin requests from `file://`). Both require a GitHub personal access token with the scopes listed under **Publishing settings and filing reports**.
+
 ## Map model
 
 - **Sector** — a 4 × 6 hex grid: **24 hexes**. Defined by `CONFIG.sector`. Generated sectors hold 4–6 seeded systems; the home sector has the fixed capital plus four seeded systems.
@@ -212,12 +231,12 @@ Browser saves use `localStorage`; the run archive also downloads and loads a pla
 
 ```
 MVP V3.0/
-├── index.html                 markup only: app shell, galaxy, sector, overlays
+├── index.html                 markup only: app shell, galaxy, sector, overlays, debug console, GitHub window
 ├── favicon.svg                ring mark for the browser tab
 ├── README.md
 ├── css/
 │   ├── base.css               design tokens, reset, shared type
-│   ├── topbar.css             sticky top bar, resources, economy-scope strip, stability, threat chip, EVENTS chip and SAVE chip
+│   ├── topbar.css             sticky top bar, resources, economy-scope strip, stability, threat chip, EVENTS chip, SAVE chip and REPORT chip
 │   ├── views.css              main views, 24-hex map, enemy markers, battle badge, raid-warning threshold, charted-space wash, patrol-zone overlays and the empire sector ledger
 │   ├── galaxy.css             circular graph stage, ring/radial/shortcut lanes, rival nodes, VIEW layer menus, trade routes and the trade panel
 │   ├── nav.css                bottom navigation
@@ -225,7 +244,8 @@ MVP V3.0/
 │   ├── sheets.css             bottom sheet, population menu (maintenance steppers, colony meters and crew reset), run archive, battle balance bar and forecast
 │   ├── event.css              event overlay and swipe card
 │   ├── screens.css            home menu, new-game setup, end screen, saved-run CONTINUE card, seed picker
-│   ├── debug.css              the debug console: tabs, cards, fields, lists, event rows, economy preview and tech accordions
+│   ├── debug.css              the debug console: tabs, cards, fields, lists, event rows, economy preview, tech accordions and the PUSH TO REMOTE footer
+│   ├── github.css             the push/report window: sign-in card, facts, report form, success and error states
 │   └── utilities.css          toast, the long-press progress ring, small-screen and reduced-motion rules
 └── js/
     ├── data/                  content and balance tables
@@ -240,12 +260,13 @@ MVP V3.0/
     │   ├── anomalies.js       ANOMALY_TYPES: survey sites, study turns and rewards
     │   ├── resources.js       RESOURCE_META (including population for effect pills) + key order
     │   ├── systems.js         home capital, sector names, planet/name pools
-    │   └── debug-schema.js    debug tabs + per-field labels, ranges, enums and list templates
+    │   ├── debug-schema.js    debug tabs + per-field labels, ranges, enums and list templates
+    │   └── standard-rules.js  the published rulebook (generated by PUSH TO REMOTE; null until the first push)
     ├── core/                  game rules and calculations
     │   ├── rng.js             seeded PRNG helpers
     │   ├── galaxy.js          seeded ring topology, parent lanes, shortcuts, sector maps + rival spawn
     │   ├── state.js           state factory, run counter, ship factory, starting fleet, military and rival state
-    │   ├── run-rules.js       per-match rulebook: capture/apply/reset CONFIG, the event deck and the content tables; override counting
+    │   ├── run-rules.js       per-match rulebook: capture/apply/reset CONFIG, the event deck and the content tables; published-standard boot, adoptRunStandard and override counting
     │   ├── helpers.js         formatting, lookups, refit-aware ship hull/speed/power, building levels and refit costs, tech effect readers (radar, gate ops, trade routes, stronghold bonuses), sector power, sector INTEL and raid forecasts
     │   ├── colony.js          planet size, standard/bonus slots, slot unlocking, the workforce plan, minimum-population gates and pinned crew orders
     │   ├── colony-economy.js  the colony economy: E_required = P^1.1, H = M_spent^0.9, happiness, growth, maintenance percentages, per-sector allocation, population-weighted happiness and growth banking
@@ -258,12 +279,14 @@ MVP V3.0/
     │   ├── event-engine.js    paced draws, category weights, buckets, deck summary and the stability-driven unrest chance and draw
     │   ├── trade.js           gate reach, gate jump ops, multi-route trading centers, route status, per-turn transfers and the galaxy trade summary
     │   ├── economy.js         per-sector ledgers (clamped at zero), per-planet breakdown, maintenance and infrastructure upkeep lines, the stability blend, empire totals and income carry
-    │   └── save.js            save snapshot, validation, restore and metadata
+    │   ├── save.js            save snapshot, validation, restore and metadata
+    │   └── github.js          GitHub API client: target, token session, Contents push, issue creation, standard-file and report payloads
     ├── ui/                    rendering; reads state, writes DOM
     │   ├── dom.js             cached nodes and shared render helpers
     │   ├── start-screen.js    home menu, new-game setup page, ethic picker + seed control
-    │   ├── debug-screen.js    the six-tab rule sandbox: generic object/list renderer, event editor, economy preview and delegated controls
-    │   ├── topbar.js          sector-scoped energy/minerals, empire research/influence, economy-scope strip, stability, threat and the EVENTS deck chip
+    │   ├── debug-screen.js    the six-tab rule sandbox: generic object/list renderer, event editor, economy preview, standard status and delegated controls
+    │   ├── github-modal.js    the push/report window: sign-in, report form, pending/error/success views and delegated controls
+    │   ├── topbar.js          sector-scoped energy/minerals, empire research/influence, economy-scope strip, stability, threat, the EVENTS deck chip and SAVE/REPORT visibility
     │   ├── map.js             sector hex map, per-hull fleet badges, survey sites, rival systems/ships, in-hex and ranged war badge, red raid-warning thresholds and INTEL header, toggled charted-space wash and patrol zones, routes, threats, the sector ledger tiles and the VIEW layer menu
     │   ├── galaxy-view.js     circular ring graph, shortcut lanes, rival nodes, site counts, two-axis scroll-to-current, VIEW trade layer, trade routes and the route ledger panel
     │   ├── nav.js             tab switching and view visibility
@@ -285,7 +308,8 @@ MVP V3.0/
     │   ├── event-card.js      event rendering and choice resolution
     │   ├── swipe.js           swipe-to-decide gesture
     │   ├── turn.js            turn pipeline: population maintenance, infrastructure upkeep, shipyard launches, movement, rival AI, combat, growth, production, trade transfers, win/lose, new run
-    │   └── save-actions.js    browser quick save, JSON save files, load/continue and the start-screen summary
+    │   ├── save-actions.js    browser quick save, JSON save files, load/continue and the start-screen summary
+    │   └── github-actions.js  the push/report submit flow, sign-in hand-off, run facts and standard adoption
     └── main.js                event wiring + boot (loaded last)
 
 tests/
@@ -299,7 +323,8 @@ tests/
 ├── save-harness.js            Node VM checks for snapshots, validation, RNG and deck continuation and a full turn on a restored run
 ├── quick-move-harness.js      Node VM checks for the long-press routing, the single-ship shortcut, the ship picker hand-off, the pending-order and phase guards and the picker markup
 ├── debug-harness.js           Node VM logic + UI checks for the rulebook capture/apply/reset, nullable event gates, save v3 round-trip, v2 compatibility, all six tab layouts and the delegated controls
-└── fog-harness.js             Node VM UI checks for what the galaxy, sector, topbar and dossier screens may publish
+├── fog-harness.js             Node VM UI checks for what the galaxy, sector, topbar and dossier screens may publish
+└── github-harness.js          Node VM checks for the standard round-trip, boot adoption, API requests/mocks, window markup and both end-to-end flows
 ```
 
 ## Load order
@@ -307,11 +332,13 @@ tests/
 The scripts are **classic scripts sharing one global scope**, so the order in `index.html` is the dependency order:
 
 ```
-data (… debug-schema) → core (rng, galaxy, state, run-rules, helpers, colony economy, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save) → ui (… debug-screen) → game → main
+data (… debug-schema, standard-rules) → core (rng, galaxy, state, run-rules, helpers, colony economy, hex grid, empires, combat, rival AI, effects, survey, event engine, trade, economy, save, github) → ui (… debug-screen, github-modal) → game (… save-actions, github-actions) → main
 ```
-`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js`, `tests/quick-move-harness.js`, `tests/save-harness.js` and `tests/debug-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech, stability, quick-move and debug harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state.
+`tests/military-harness.js`, `tests/colony-harness.js`, `tests/economy-harness.js`, `tests/name-harness.js`, `tests/fog-harness.js`, `tests/population-harness.js`, `tests/tech-harness.js`, `tests/stability-harness.js`, `tests/quick-move-harness.js`, `tests/save-harness.js`, `tests/debug-harness.js` and `tests/github-harness.js` load the data/core/game files in a Node VM with UI stubs; they are not part of the browser bundle. The fog, population, tech, stability, quick-move, debug and github harnesses also load the renderers in `js/ui/` behind element stubs so they can assert on the HTML a screen actually builds. The save harness runs the real turn pipeline on a restored state; the github harness replaces `fetch` with a mock.
 
-`js/data/debug-schema.js` follows `systems.js` and `js/core/run-rules.js` follows `state.js`: the rulebook captures its defaults at load time, so every data table has to exist first. `js/ui/debug-screen.js` follows `dom.js` and `start-screen.js` and still loads before `main.js`.
+`js/data/debug-schema.js` follows `systems.js`, and `js/data/standard-rules.js` follows every data table because it declares a complete published rulebook over them. `js/core/run-rules.js` follows `state.js` and `standard-rules.js`: it applies the published standard before it captures `RUN_RULE_DEFAULTS`, so every data table has to exist first. `js/ui/debug-screen.js` follows `dom.js` and `start-screen.js` and still loads before `main.js`.
+
+`js/core/github.js` sits at the end of the `core` group (after `save.js`), `js/ui/github-modal.js` follows `debug-screen.js` in the `ui` group, and `js/game/github-actions.js` follows `save-actions.js` in the `game` group. The window only calls the API client from event handlers, so the two files can load in their layer order without a boot dependency.
 
 `js/ui/long-press.js` sits at the end of the `ui` group (before the `game` files) and `js/game/quick-move.js` follows `planet-nav.js`, because the quick move hands its ship to `beginFleetMove()`.
 
@@ -431,6 +458,15 @@ Most balance rows below are also editable without touching code from the **debug
 | Change the browser slot, file download/load or the start-screen CONTINUE card | `js/game/save-actions.js` |
 | Change the save sheet or its actions | `js/ui/sheet-content.js` (`saveSheetHTML`), `js/ui/sheets.js` (`openSaveSheet`), `css/sheets.css` |
 | Change the SAVE chip or the saved-run card look | `index.html`, `js/ui/topbar.js`, `css/topbar.css`, `css/screens.css` |
+| Change the REPORT chip or its visibility | `index.html` (`#report-chip`), `js/ui/topbar.js` (`renderSaveChip`), `css/topbar.css` |
+| Change the repository, branch or standard file that PUSH TO REMOTE writes | `GITHUB_TARGET` in `js/core/github.js`; `js/data/standard-rules.js`; its `<script>` in `index.html` |
+| Change how a published standard becomes the default, or adopt one without a reload | `js/core/run-rules.js` (boot pass, `adoptRunStandard`), `js/data/standard-rules.js`, `index.html` |
+| Change the debug footer's push button or standard status | `index.html` (`#debug-push`, `#debug-standard`), `js/ui/debug-screen.js` (`renderDebugStandard`), `css/debug.css` |
+| Change the GitHub sign-in copy, token scopes or help links | `js/ui/github-modal.js` (`githubCredentialsHTML`) |
+| Change the report title/body or what a report attaches | `js/core/github.js` (`buildIssueTitle`, `buildIssueBody`), `js/game/github-actions.js` (`collectGithubFacts`) |
+| Change the pushed file format or the generated commit message | `js/core/github.js` (`buildStandardRulesFile`, `buildStandardMeta`, `buildPushCommitMessage`) |
+| Change the GitHub window layout, styling or controls | `index.html` (`#github-layer`), `js/ui/github-modal.js`, `css/github.css` |
+| Change the API client, auth header or GitHub error messages | `js/core/github.js` (`githubFetch`, `githubResponseError`) |
 | Change the home menu, the START A NEW GAME flow or the setup page | `index.html`, `js/ui/start-screen.js`, `css/screens.css` |
 | Add or reorder a debug tab, or change how a tab renders | `js/data/debug-schema.js` (`DEBUG_TABS`), `js/ui/debug-screen.js` (`debugTabHTML`) |
 | Give a debug field a better label, range, enum or list template | `js/data/debug-schema.js` (`DEBUG_FIELD_META`, `DEBUG_CONTENT_FIELDS`) |
@@ -439,7 +475,7 @@ Most balance rows below are also editable without touching code from the **debug
 
 ## Verification
 
-The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Debug settings pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
+The passes below are historical verification records, oldest first. Current rules are the sections above; the latest pass is **Remote settings and report pass** at the end of this file. Some older numbers (especially housing/sustenance and the pre-facility building outputs) describe the balance of their own pass, not the current build.
 
 The randomized ring galaxy was exercised in headless Chrome with scripted runs:
 
@@ -698,3 +734,17 @@ The launch screen is now a menu, and every match can carry its own balance. `nod
 - **Delegated controls:** a fake click on a card switch disabled and re-enabled it; the deck button retired and restored `pirateRaiders`; the category weight input wrote `EVENT_CATEGORIES.hazard.weightMult`; an unrest weight was editable while the card was disabled, and its switch re-enabled it; a generic number input wrote the live growth exponent and refreshed the preview; a text input wrote a happiness-tier label; a boolean switch wrote `CONFIG.anomalies.enabled`; the interval-ramp list added a template and removed it; a hull attack field and a hull refit list wrote the content table; the two-tap RESET restored the defaults.
 - **Browser flow:** a scripted headless-Chrome run at **440 × 1000** passed **30 checks** with no page console errors: boot on the home menu, START A NEW GAME opens the setup page, DEBUG SETTINGS opens from setup, all six tabs are present, the exponent, starting-facility, event-weight and jump-cost controls all apply and the economy preview follows the exponent, a card is retired, a race starts with every edit intact, the SAVE sheet offers and opens the live console, generation fields are disabled in the live run, a live RESET restores the balance while keeping the open galaxy's sector shape, planet-size table and seed, the custom save carries the rulebook and the retired card, loading restores both, and every rendered field in every tab binds to a live path. Screenshots confirmed the home menu and all six debug tabs.
 - **Browser storage:** a second **8-check** headless-Chrome pass saved a live run to `localStorage`, confirmed the stored snapshot carried its rulebook, saw **CONTINUE** with the tweak count, used **PLAY AGAIN** (rules back to defaults), then continued and got both the run and its custom rules back.
+
+### Remote settings and report pass
+
+`node tests/github-harness.js` is a new Node VM harness with **126 checks** covering the published standard, the GitHub client, both windows and both end-to-end flows; the colony (**306**), debug (**113**), economy (**154**), fog (**74**), military (**217**), name (**61**), population (**172**), quick-move (**41**), save (**63**), stability (**126**) and technology (**213**) harnesses still pass.
+
+- **Standard file round-trip:** `buildStandardRulesFile()` emitted a valid classic script with `STANDARD_RULES_META` and a pretty-printed `STANDARD_RULES`. Parsing it back with `new Function` preserved the pusher, date, turn, seed, tweak count, starting energy and base income. UTF-8 base64 round-tripped "città ✓ 日本" through the Contents API encoding.
+- **Boot adoption:** a fresh realm loaded the data tables, the generated standard, then `run-rules.js`. `CONFIG.startingResources.energy` became **33**, `baseIncome.energy` became **9**, `RUN_RULE_DEFAULTS` and `getRunStandardMeta()` carried the same values, `isRunStandardActive()` was true and `countRuleOverrides()` was **0**. A live edit then **RESET** back to **33**. A realm with no standard kept the in-code **15 / 4**. A partial standard changed only the field it named and filled an emptied facility-level list from the code defaults. `adoptRunStandard()` made a pushed rulebook the in-memory baseline without a reload; `RESET` used it.
+- **Report payload:** the issue title takes the first non-empty line, strips a Markdown heading, prefixes `[REPORT]` and clips at 70 characters. The body carried the free text, turn, seed, origin, colony/stability/sector context, reporter and timestamp, plus a collapsed rulebook. The attachment can be switched off, an oversized rulebook is omitted with a note, and a report over GitHub's 65,000-character body limit is rejected with a `too-long` error.
+- **API contract:** the mocked API checked `GET /user` with `Authorization: Bearer …`, the `cache: no-store` request shape, the Contents URL with `?ref=main`, an existing file's blob SHA in the `PUT`, no SHA when creating the file, `branch: main`, the generated commit message and standard-file base64, and `POST /repos/…/issues` with the title and body. A 401 mapped to "use a PAT", a 403 with a zero rate limit mapped to rate-limit, a 403 without it named **Contents: Read and write**, an offline fetch mapped to network, and a token whose owner did not match the typed username was rejected. The public session object never contained the token.
+- **Window markup:** the push window rendered the repository, file, branch, current standard, tweak count, source, username/token fields (token masked) and the token-scope note; the report window rendered the free-text box capped at 60,000, the live title preview, the rulebook checkbox and the run facts. User text was HTML-escaped, the signed-in card replaced the credentials, the signed-out footers read **SIGN IN & PUSH** / **SIGN IN & FILE ISSUE**, and the debug footer printed **IN-CODE DEFAULTS**, the unpublished tweak count and **@user · date · UP TO DATE** in turn.
+- **End-to-end in the VM:** a live run with a **2-tweak** edit pushed through `submitGithubPush()`: the mock saw `GET /user`, `GET contents` (404), and `PUT contents`; the committed file decoded to a valid standard with the edited values; the success view showed the commit link; the standard metadata was adopted; the tweak count dropped to **0**. A report then used the existing session (no credential fields), posted the free text plus turn **1**, seed **20261112** and the rulebook, showed **ISSUE #42 FILED**, and cleared the draft. No success toast was used, so the window's own result is the only confirmation.
+- **Browser flow:** a scripted headless-Chrome run at **390 × 844**, then **320 × 700**, against a temporary copy of the app served over HTTP, with `fetch` mocked to play `api.github.com` (no real credentials or commits). It passed with **no page exceptions and no console warnings/errors**. The run: boot on the in-code defaults, start a game, **REPORT** opens from the top bar, free text and credentials are entered, the live title preview updates, **SIGN IN & FILE ISSUE** creates issue **#42** with the turn/seed/origin/rulebook body and shows the link; SAVE → **OPEN DEBUG SETTINGS** → **⇧ PUSH TO REMOTE** shows *2 tweaks since the standard*, signs in, sends a `PUT` to `main` and shows **STANDARD PUBLISHED**; the returned file was written into the temporary copy and the browser reloaded, after which `CONFIG.startingResources.energy` was **33**, `CONFIG.baseIncome.energy` was **9**, `getRunStandardMeta().pushedBy` was **rizzo-test** and `countRuleOverrides()` was **0**; the setup debug footer read **@rizzo-test · 2026-11-25 · UP TO DATE**, an edit showed **1 TWEAK UNPUBLISHED**, and the two-tap **RESET** put starting energy back to **33**.
+- **Layout:** at **390** the topbar's EVENTS / SAVE / REPORT / TURN 1 row fitted (report right edge **335.1** of 390). At **320** the SAVE/REPORT labels collapse to icons, the report chip's right edge was **268.1**, the turn label's **313**, and the document did not overflow. The report window was exactly **320 px** wide with no horizontal body overflow, and the debug footer's **PUSH TO REMOTE** and **DONE** buttons fitted (push right edge **215**). Screenshots of the chip row, both windows, both success views, the debug footer and the 320 px variants were reviewed.
+- **CORS:** an unauthenticated `GET https://api.github.com/repos/Rizzo98/stellaris-dominion` returned `access-control-allow-origin: *`, and an `OPTIONS` preflight for a `PUT` with `authorization,content-type` returned **204** with those headers and `GET, POST, PATCH, PUT, DELETE` allowed, confirming the static page can call the API directly.
