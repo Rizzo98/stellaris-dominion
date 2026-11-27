@@ -649,6 +649,10 @@ button.structure-card[aria-expanded="true"] .structure-card-chevron{
 .ship-order-chip.patrol-chip{
   border-color:rgba(103,232,213,.3);background:rgba(16,47,46,.55);color:var(--cyan);
 }
+.ship-order-chip.patrol-away-chip{
+  border-color:rgba(255,122,122,.34);background:rgba(58,25,28,.55);color:#ffb9b9;
+}
+.patrol-away{color:#ffb9b9;font-weight:750}
 .patrol-section .fleet-section-head h3{color:var(--cyan)}
 .patrol-list{display:flex;flex-direction:column;gap:6px}
 .patrol-row{
@@ -859,6 +863,20 @@ button.structure-card[aria-expanded="true"] .structure-card-chevron{
 .battle-callout.ranged .battle-callout-main .kicker{color:var(--violet)}
 .battle-callout.ranged .battle-callout-btn{
   border-color:rgba(198,168,255,.38);background:rgba(48,38,72,.5);color:#e0d4ff;
+}
+.battle-callout.intercept{
+  border-color:rgba(255,122,122,.42);
+  background:
+    radial-gradient(circle at 8% 10%,rgba(255,122,122,.16),transparent 45%),
+    linear-gradient(145deg,rgba(42,20,26,.9),rgba(10,18,30,.92));
+  box-shadow:0 0 22px rgba(255,122,122,.08);
+}
+.battle-callout.intercept .battle-callout-icon{
+  border-color:rgba(255,150,150,.5);background:rgba(44,16,22,.8);color:#ffc9c9;
+}
+.battle-callout.intercept .battle-callout-main .kicker{color:#ffb9b9}
+.battle-callout.intercept .battle-callout-btn{
+  border-color:rgba(255,150,150,.38);background:rgba(58,24,26,.5);color:#ffd0d0;
 }
 
 @media (max-width:350px){

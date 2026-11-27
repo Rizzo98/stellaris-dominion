@@ -295,7 +295,14 @@ function setHomePatrols(empire) {
       return;
     }
     ship.returnHome = false;
-    if (!ship.path && !ship.jumpSector) ship.patrol = true;
+    if (!ship.path && !ship.jumpSector) {
+      ship.patrol = true;
+      /* Rival stations work like the player's: the zone stays where the
+         patrol was set, and a hull recalled after a raid anchors anew. */
+      if (!ship.patrolHomeKey || ship.patrolHomeSectorId !== homeSectorId) {
+        setShipPatrolStation(ship, homeSectorId, entry.key);
+      }
+    }
   });
 }
 
@@ -318,6 +325,7 @@ function orderRaidShips(empire, targetSectorId) {
     entry.ship.raidTargetSectorId = targetSectorId;
     entry.ship.returnHome = false;
     entry.ship.patrol = false;
+    clearShipPatrolStation(entry.ship);
     delete entry.ship.path;
     delete entry.ship.pathSectorId;
     delete entry.ship.jumpSector;
@@ -340,6 +348,7 @@ function orderRaidShips(empire, targetSectorId) {
       entry.ship.raidTargetSectorId = targetSectorId;
       entry.ship.returnHome = false;
       entry.ship.patrol = false;
+      clearShipPatrolStation(entry.ship);
       delete entry.ship.path;
       delete entry.ship.pathSectorId;
       delete entry.ship.jumpSector;
@@ -396,6 +405,7 @@ function recallRaiders(empire) {
     if (entry.sectorId === empire.sectorId && entry.key === empire.capitalKey) {
       ship.returnHome = false;
       ship.patrol = true;
+      setShipPatrolStation(ship, entry.sectorId, entry.key);
       return;
     }
     if (ship.returnHome) {
@@ -534,8 +544,16 @@ function advanceRivalFleets() {
       if (!fleet || !fleet.length) return;
       const staying = [];
       let changed = false;
+      const pos = parseHexKey(key);
+      /* A hostile sharing a hex with a player patrol is engaged: it holds
+         the hex instead of walking out of the fight. */
+      const pinned = !!getEngagedPatrolAt(sector.id, pos.row, pos.col);
 
       fleet.forEach(function (ship) {
+        if (pinned) {
+          staying.push(ship);
+          return;
+        }
         if (ship.jumpSector) {
           const departureKey = getLandingHexFor(sector, ship.jumpSector);
           if (key === departureKey && (!ship.path || !ship.path.length)) {

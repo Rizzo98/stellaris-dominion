@@ -1,16 +1,21 @@
 /* ============================================================
-   COMBAT — patrol coverage, ship damage, raids and repair
+   COMBAT — patrol interception, ship damage, raids and repair
    Combat resolves once per turn after both fleets have moved.
-   Every warship fires at a hostile in its own hex; a patrolling corvette
-   (radius 1) and an online stronghold (radius 2) extend that reach.
+   Every warship fires at a hostile in its own hex. A patrolling corvette
+   keeps a station and a patrol radius (1 by default); when a hostile ship
+   is inside that radius the corvette flies onto it before the volley and
+   fights in the hostile hex, then returns to its station once the fight is
+   over. The cyan coverage stays anchored on the station and the temporary
+   outbound route is drawn by the map. An online stronghold (radius 2) is
+   the only unit that truly fires across hexes.
    Damage is simultaneous, so a hull that is destroyed still fires once.
    Civilians do not shoot, but they can be shot at. Rival ships near a
    player colony raid it unless a friendly patrol or stronghold covers
-   the colony's hex.
-   Battle readouts cover ranged defences too: a hostile hex can include the
-   patrols and strongholds firing into it from neighbouring hexes. Only a
-   unit with a firing solution contributes to a volley, so a patrol firing
-   at a stationary corvette is not shown taking return fire.
+   the colony's hex. A hostile sharing a hex with a player patrol holds
+   that hex: the engagement is not a chase.
+   Battle readouts project an intercepting patrol as an in-hex combatant,
+   so its forecast includes the hostile return fire; strongholds keep their
+   true ranged volley.
    ============================================================ */
 
 function createMilitaryState(seed) {
@@ -86,6 +91,310 @@ function getStructurePatrolRadius(structure) {
   return base + getStrongholdRadiusBonus();
 }
 
+/* A warship's guns reach its own hex. Patrol radius is a response zone, not
+   a firing range: the hull flies to the hostile instead of shooting across
+   the gap. Static strongholds keep their true firing radius. */
+function getShipCombatRange(ship) {
+  return 0;
+}
+
+/* ---------- patrol stations and interception ---------- */
+
+/* Patrol is a stance tied to a station. The station is where the order was
+   given, and the cyan coverage stays anchored there even while the corvette
+   is away. patrolHomeKey/patrolHomeSectorId remember it; patrolTargetKey
+   remembers the hostile hex the hull is flying to or fighting in. */
+function setShipPatrolStation(ship, sectorId, key) {
+  if (!ship) return null;
+  const pos = parseHexKey(key);
+  if (!isInsideSector(pos.row, pos.col)) return null;
+  ship.patrolHomeKey = key;
+  ship.patrolHomeSectorId = sectorId;
+  delete ship.patrolTargetKey;
+  return { sectorId: sectorId, key: key, row: pos.row, col: pos.col };
+}
+
+function clearShipPatrolStation(ship) {
+  if (!ship) return;
+  delete ship.patrolHomeKey;
+  delete ship.patrolHomeSectorId;
+  delete ship.patrolTargetKey;
+}
+
+function getShipPatrolStation(ship, sectorId) {
+  if (!ship || !ship.patrol || !ship.patrolHomeKey) return null;
+  if (ship.patrolHomeSectorId && ship.patrolHomeSectorId !== sectorId) return null;
+  const pos = parseHexKey(ship.patrolHomeKey);
+  if (!isInsideSector(pos.row, pos.col)) return null;
+  return { sectorId: sectorId, key: ship.patrolHomeKey, row: pos.row, col: pos.col };
+}
+
+/* A patrol ordered before stations existed (or a rival hull launched already
+   on station) anchors where it stands on its first resolution. */
+function ensureShipPatrolStation(ship, sectorId, row, col) {
+  if (!ship || !ship.patrol) return null;
+  if (!ship.patrolHomeKey || ship.patrolHomeSectorId !== sectorId) {
+    setShipPatrolStation(ship, sectorId, hexKey(row, col));
+  }
+  return getShipPatrolStation(ship, sectorId);
+}
+
+/* The temporary outbound line: station -> hull's current hex. It disappears
+   as soon as the corvette is back on station. */
+function getPatrolExcursion(ship, sectorId, currentKey) {
+  const station = getShipPatrolStation(ship, sectorId);
+  if (!station || !currentKey) return null;
+  const current = parseHexKey(currentKey);
+  if (!isInsideSector(current.row, current.col)) return null;
+  if (station.row === current.row && station.col === current.col) return null;
+  const route = findHexPath(station.row, station.col, current.row, current.col);
+  if (!route || !route.length) return null;
+  return {
+    sectorId: sectorId,
+    homeKey: station.key,
+    currentKey: hexKey(current.row, current.col),
+    route: route,
+    targetKey: ship.patrolTargetKey || null
+  };
+}
+
+/* Living hostile hulls in one hex, from the point of view of 'ship'. */
+function getHostileShipsAtKey(sector, ship, key) {
+  if (!sector || !ship) return [];
+  const owner = ship.owner || "player";
+  const out = [];
+  if (owner !== "player") {
+    ((sector.fleets || {})[key] || []).forEach(function (other) {
+      if (other && getShipHull(other) > 0) out.push(other);
+    });
+  }
+  ((sector.rivalFleets || {})[key] || []).forEach(function (other) {
+    if (!other) return;
+    if ((other.owner || "player") === owner) return;
+    if (getShipHull(other) > 0) out.push(other);
+  });
+  return out;
+}
+
+/* The closest hostile hull inside the station's patrol radius. Warships win
+   ties over civilian hulls, then the lower row/column keeps the pick
+   deterministic. */
+function findPatrolTarget(sector, ship, station, fromRow, fromCol) {
+  const radius = getShipPatrolRadius(ship);
+  if (!sector || radius <= 0) return null;
+  const seen = new Set();
+  let best = null;
+  function consider(key) {
+    if (seen.has(key)) return;
+    seen.add(key);
+    const pos = parseHexKey(key);
+    if (!isInsideSector(pos.row, pos.col)) return;
+    if (hexDistance(station.row, station.col, pos.row, pos.col) > radius) return;
+    const hostiles = getHostileShipsAtKey(sector, ship, key);
+    if (!hostiles.length) return;
+    const military = hostiles.some(function (other) {
+      const type = SHIP_TYPES[other.type];
+      return !!type && !!type.military;
+    });
+    const distance = hexDistance(fromRow, fromCol, pos.row, pos.col);
+    const candidate = { key: key, row: pos.row, col: pos.col, distance: distance, military: military };
+    if (!best ||
+        candidate.distance < best.distance ||
+        (candidate.distance === best.distance && candidate.military && !best.military) ||
+        (candidate.distance === best.distance && candidate.military === best.military &&
+          (candidate.row < best.row ||
+            (candidate.row === best.row && candidate.col < best.col)))) {
+      best = candidate;
+    }
+  }
+  Object.keys(sector.rivalFleets || {}).forEach(consider);
+  if ((ship.owner || "player") !== "player") Object.keys(sector.fleets || {}).forEach(consider);
+  return best;
+}
+
+/* Move one hull up to its speed along the shortest route. A player patrol
+   charts every hex it enters, exactly like a player-ordered move; a rival
+   patrol moves without revealing fog to the player. */
+function moveShipToward(sector, ship, fromKey, toKey, chart) {
+  const from = parseHexKey(fromKey);
+  const to = parseHexKey(toKey);
+  if (from.row === to.row && from.col === to.col) return fromKey;
+  const path = findHexPath(from.row, from.col, to.row, to.col);
+  if (!path || !path.length) return fromKey;
+  const steps = Math.min(getShipSpeed(ship), path.length);
+  let cursor = fromKey;
+  for (let i = 0; i < steps; i += 1) {
+    const next = parseHexKey(path[i]);
+    if (chart) markHexExplored(next.row, next.col, sector.id);
+    cursor = hexKey(next.row, next.col);
+  }
+  return cursor;
+}
+
+function applyPatrolMove(sector, ship, fromKey, toKey, player) {
+  if (!sector || !ship || fromKey === toKey) return;
+  const buckets = player ? sector.fleets : sector.rivalFleets;
+  const fleet = buckets[fromKey];
+  if (!fleet) return;
+  const index = fleet.indexOf(ship);
+  if (index === -1) return;
+  fleet.splice(index, 1);
+  if (!fleet.length) delete buckets[fromKey];
+  buckets[toKey] = (buckets[toKey] || []).concat(ship);
+}
+
+function applyPatrolMoves(moves) {
+  moves.forEach(function (move) {
+    applyPatrolMove(move.sector, move.ship, move.fromKey, move.toKey, move.player);
+  });
+}
+
+/* Every patrol hull acts before the volley: hold a fight that already shares
+   its hex, otherwise fly at the closest hostile inside the station's zone,
+   otherwise fly home. Only the patrolling hull moves; the enemy stays put. */
+function resolvePatrolInterceptions() {
+  if (!state || !state.galaxy) return;
+  state.galaxy.sectors.forEach(function (sector) {
+    const entries = [];
+    Object.keys(sector.fleets || {}).forEach(function (key) {
+      (sector.fleets[key] || []).forEach(function (ship) {
+        if (ship && ship.patrol) entries.push({ ship: ship, key: key, player: true });
+      });
+    });
+    Object.keys(sector.rivalFleets || {}).forEach(function (key) {
+      (sector.rivalFleets[key] || []).forEach(function (ship) {
+        if (ship && ship.patrol) entries.push({ ship: ship, key: key, player: false });
+      });
+    });
+    entries.forEach(function (entry) {
+      const ship = entry.ship;
+      /* A hull following a normal route or a lane jump keeps that order;
+         patrol interception only drives idle stations. */
+      if ((ship.path && ship.path.length) || ship.jumpSector) return;
+      const from = parseHexKey(entry.key);
+      const station = ensureShipPatrolStation(ship, sector.id, from.row, from.col);
+      if (!station) return;
+      const hostileHere = getHostileShipsAtKey(sector, ship, entry.key).length > 0;
+      let targetKey = null;
+      if (hostileHere) {
+        targetKey = entry.key;
+      } else {
+        const target = findPatrolTarget(sector, ship, station, from.row, from.col);
+        targetKey = target ? target.key : (entry.key === station.key ? null : station.key);
+      }
+      if (targetKey) {
+        ship.patrolTargetKey = targetKey;
+      } else {
+        delete ship.patrolTargetKey;
+      }
+      if (!targetKey) return;
+      /* Moves apply as they are resolved. Player stations respond first, so
+         an incoming corvette is already in the hex when the rival station
+         decides: the rival holds and the two hulls meet. */
+      const destinationKey = moveShipToward(sector, ship, entry.key, targetKey, entry.player);
+      applyPatrolMove(sector, ship, entry.key, destinationKey, entry.player);
+    });
+  });
+}
+
+/* After the volley, a patrol with nothing left to fight flies home. A hull
+   still closing on a live target (a radius wider than its speed) keeps
+   approaching instead of ping-ponging back to station. */
+function settlePatrolInterceptions() {
+  if (!state || !state.galaxy) return;
+  const moves = [];
+  state.galaxy.sectors.forEach(function (sector) {
+    const entries = [];
+    Object.keys(sector.fleets || {}).forEach(function (key) {
+      (sector.fleets[key] || []).forEach(function (ship) {
+        if (ship && ship.patrol) entries.push({ ship: ship, key: key, player: true });
+      });
+    });
+    Object.keys(sector.rivalFleets || {}).forEach(function (key) {
+      (sector.rivalFleets[key] || []).forEach(function (ship) {
+        if (ship && ship.patrol) entries.push({ ship: ship, key: key, player: false });
+      });
+    });
+    entries.forEach(function (entry) {
+      const ship = entry.ship;
+      if ((ship.path && ship.path.length) || ship.jumpSector) return;
+      const from = parseHexKey(entry.key);
+      const station = ensureShipPatrolStation(ship, sector.id, from.row, from.col);
+      if (!station) return;
+      if (getHostileShipsAtKey(sector, ship, entry.key).length) {
+        ship.patrolTargetKey = entry.key;
+        return;
+      }
+      const targetKey = ship.patrolTargetKey;
+      if (targetKey && targetKey !== station.key &&
+          getHostileShipsAtKey(sector, ship, targetKey).length) {
+        return;
+      }
+      delete ship.patrolTargetKey;
+      if (entry.key === station.key) return;
+      const destinationKey = moveShipToward(sector, ship, entry.key, station.key, entry.player);
+      if (destinationKey !== entry.key) {
+        moves.push({ sector: sector, ship: ship, fromKey: entry.key, toKey: destinationKey, player: entry.player });
+      }
+    });
+  });
+  applyPatrolMoves(moves);
+}
+
+/* "station" (at its post), "engaging" (fighting in its hex), "intercepting"
+   (closing on a live target) or "returning" (flying home). */
+function getShipPatrolStatus(ship, sectorId, row, col) {
+  if (!ship || !ship.patrol) return "off";
+  const station = getShipPatrolStation(ship, sectorId);
+  if (!station) return "station";
+  if (station.row === row && station.col === col) return "station";
+  const sector = getSector(sectorId);
+  if (!sector) return "returning";
+  if (getHostileShipsAtKey(sector, ship, hexKey(row, col)).length) return "engaging";
+  if (ship.patrolTargetKey && getHostileShipsAtKey(sector, ship, ship.patrolTargetKey).length) {
+    return "intercepting";
+  }
+  return "returning";
+}
+
+/* A player corvette on patrol physically grapples whatever shares its hex.
+   Rival movement checks this before following a path: an engaged hostile
+   holds its hex until the fight is over instead of kiting the patrol. */
+function getEngagedPatrolAt(sectorId, row, col) {
+  const sector = getSector(sectorId);
+  if (!sector) return null;
+  const fleet = (sector.fleets || {})[hexKey(row, col)] || [];
+  for (let i = 0; i < fleet.length; i += 1) {
+    const ship = fleet[i];
+    if (!ship || !ship.patrol) continue;
+    const type = SHIP_TYPES[ship.type];
+    if (type && type.military) return ship;
+  }
+  return null;
+}
+
+/* A patrol on station will fly into a hostile hex inside its radius when the
+   turn resolves. The battle readout uses this to project the in-hex fight;
+   the forecast itself is still the real volley. */
+function canPatrolInterceptHex(sector, ship, entry, row, col) {
+  if (!sector || !ship || !ship.patrol) return false;
+  /* An order given before stations existed reads as anchored where the hull
+     stands; the first resolution writes the station explicitly. */
+  const station = getShipPatrolStation(ship, sector.id) ||
+    { sectorId: sector.id, key: entry.key, row: entry.row, col: entry.col };
+  if (entry.row !== station.row || entry.col !== station.col) return false;
+  if (getHostileShipsAtKey(sector, ship, entry.key).length) return false;
+  /* Only a hostile ship pulls a patrol out; a lone stronghold stays a ranged
+     battery and does not drag the corvette off station. */
+  if (!getHostileShipsAtKey(sector, ship, hexKey(row, col)).length) return false;
+  if (hexDistance(station.row, station.col, row, col) > getShipPatrolRadius(ship)) return false;
+  /* Show the intercept on the hex the corvette will actually choose, not on
+     every hostile hex inside its zone. */
+  const target = findPatrolTarget(sector, ship, station, station.row, station.col);
+  if (!target || target.key !== hexKey(row, col)) return false;
+  return hexDistance(entry.row, entry.col, row, col) <= getShipSpeed(ship);
+}
+
 /* ---------- patrol / defence coverage ---------- */
 
 /* One list of every defensive source in a sector. Ships use their patrol
@@ -96,43 +405,45 @@ function collectDefenseSources(sectorId) {
   const sources = [];
   if (!sector) return sources;
 
+  /* A patrol's coverage is anchored at its station, not at the hull. The
+     source keeps the live hull position beside it so the map and the fleet
+     tab can draw the temporary outbound trace. */
+  function pushShipSource(ship, key, side) {
+    const type = SHIP_TYPES[ship.type];
+    if (!type || !type.military) return;
+    const current = parseHexKey(key);
+    const station = getShipPatrolStation(ship, sector.id);
+    const stationRow = station ? station.row : current.row;
+    const stationCol = station ? station.col : current.col;
+    sources.push({
+      side: side,
+      owner: ship.owner || side,
+      kind: "ship",
+      sectorId: sector.id,
+      key: station ? station.key : key,
+      row: stationRow,
+      col: stationCol,
+      radius: ship.patrol ? getShipPatrolRadius(ship) : 0,
+      ship: ship,
+      empire: side === "player" ? null : getEmpire(ship.owner),
+      homeKey: station ? station.key : null,
+      currentKey: key,
+      currentRow: current.row,
+      currentCol: current.col,
+      away: !!station && (station.row !== current.row || station.col !== current.col),
+      status: getShipPatrolStatus(ship, sector.id, current.row, current.col)
+    });
+  }
+
   Object.keys(sector.fleets || {}).forEach(function (key) {
-    const pos = parseHexKey(key);
     (sector.fleets[key] || []).forEach(function (ship) {
-      const type = SHIP_TYPES[ship.type];
-      if (!type || !type.military) return;
-      sources.push({
-        side: "player",
-        owner: "player",
-        kind: "ship",
-        sectorId: sector.id,
-        key: key,
-        row: pos.row,
-        col: pos.col,
-        radius: ship.patrol ? getShipPatrolRadius(ship) : 0,
-        ship: ship,
-        empire: null
-      });
+      pushShipSource(ship, key, "player");
     });
   });
 
   Object.keys(sector.rivalFleets || {}).forEach(function (key) {
-    const pos = parseHexKey(key);
     (sector.rivalFleets[key] || []).forEach(function (ship) {
-      const type = SHIP_TYPES[ship.type];
-      if (!type || !type.military) return;
-      sources.push({
-        side: ship.owner,
-        owner: ship.owner,
-        kind: "ship",
-        sectorId: sector.id,
-        key: key,
-        row: pos.row,
-        col: pos.col,
-        radius: ship.patrol ? getShipPatrolRadius(ship) : 0,
-        ship: ship,
-        empire: getEmpire(ship.owner)
-      });
+      pushShipSource(ship, key, ship.owner);
     });
   });
 
@@ -190,11 +501,18 @@ function getPlayerPatrols() {
         if (!ship.patrol) return;
         const type = SHIP_TYPES[ship.type];
         if (!type || !type.military) return;
+        const station = getShipPatrolStation(ship, sector.id);
         out.push({
           sectorId: sector.id,
-          key: key,
-          row: pos.row,
-          col: pos.col,
+          /* key/row/col name the station; the live hull position is beside it. */
+          key: station ? station.key : key,
+          row: station ? station.row : pos.row,
+          col: station ? station.col : pos.col,
+          currentKey: key,
+          currentRow: pos.row,
+          currentCol: pos.col,
+          away: !!station && (station.row !== pos.row || station.col !== pos.col),
+          status: getShipPatrolStatus(ship, sector.id, pos.row, pos.col),
           radius: getShipPatrolRadius(ship),
           ship: ship
         });
@@ -263,11 +581,12 @@ function createBattleShipUnit(ship, side, empire) {
     speed: getShipSpeed(ship),
     patrol: !!ship.patrol,
     patrolRadius: getShipPatrolRadius(ship),
-    range: getShipPatrolRadius(ship),
+    range: getShipCombatRange(ship),
     row: null,
     col: null,
     distance: 0,
     inHex: false,
+    intercepts: false,
     canFire: true,
     ship: ship
   };
@@ -300,6 +619,7 @@ function createBattleStructureUnit(structure, side, empire) {
     col: null,
     distance: 0,
     inHex: false,
+    intercepts: false,
     canFire: true,
     structure: structure
   };
@@ -464,7 +784,7 @@ function collectPlayerBattleEntries(sector) {
 }
 
 function getBattleEntryRange(entry) {
-  return entry.kind === "ship" ? getShipPatrolRadius(entry.ship) : getStructurePatrolRadius(entry.structure);
+  return entry.kind === "ship" ? getShipCombatRange(entry.ship) : getStructurePatrolRadius(entry.structure);
 }
 
 function getBattleEntryAttack(entry) {
@@ -484,11 +804,11 @@ function createBattleUnitFromEntry(entry, side, empire) {
 }
 
 /* A battle readout is anchored on hostile ground: the hex must hold at least
-   one hostile combatant. Player units join when they are in that hex, when
-   they can fire into it from a neighbouring hex (patrol radius 1, stronghold
-   radius 2), or when a hostile unit in the hex can fire at them. This is the
-   same reach the combat resolver uses, so a stationary corvette attacked by
-   a patrol is shown taking no return fire.
+   one hostile combatant. Player units join when they are in that hex, when a
+   patrol on station will fly into it before the volley, when a stronghold
+   can fire into it, or when a hostile unit in the hex can fire at them. A
+   patrol is projected as an in-hex combatant because that is where it fights
+   by the end of the turn; the forecast therefore includes the return fire.
    A player hex under ranged fire is covered by the hostile hex's own readout;
    getBattleInvolvingHex() lets the fleet tab find that engagement too. */
 function getHexBattleReadout(sectorId, row, col) {
@@ -521,9 +841,33 @@ function getHexBattleReadout(sectorId, row, col) {
   const playerUnits = [];
   collectPlayerBattleEntries(sector).forEach(function (entry) {
     const distance = hexDistance(entry.row, entry.col, row, col);
-    const range = getBattleEntryRange(entry);
-    const attack = getBattleEntryAttack(entry);
     const inHex = distance === 0;
+    const attack = getBattleEntryAttack(entry);
+
+    if (entry.kind === "ship") {
+      /* A patrol hull on station flies into the hostile hex before the
+         volley. It then fights like any in-hex unit: its guns count and the
+         hostile ships' return fire reaches it. */
+      const intercepts = !inHex && attack > 0 &&
+        canPatrolInterceptHex(sector, entry.ship, entry, row, col);
+      const canBeHit = rivalUnits.some(function (unit) {
+        return unit.attack > 0 &&
+          hexDistance(unit.row, unit.col, entry.row, entry.col) <= unit.range;
+      });
+      if (!inHex && !intercepts && !canBeHit) return;
+      const unit = createBattleUnitFromEntry(entry, "player", null);
+      if (!unit) return;
+      unit.inHex = inHex;
+      unit.distance = distance;
+      unit.range = getShipCombatRange(entry.ship);
+      unit.canFire = attack > 0 && (inHex || intercepts);
+      unit.intercepts = intercepts;
+      playerUnits.push(unit);
+      return;
+    }
+
+    /* Static defences genuinely fire across hexes. */
+    const range = getBattleEntryRange(entry);
     const canShoot = attack > 0 && distance <= range;
     const canBeHit = rivalUnits.some(function (unit) {
       return unit.attack > 0 &&
@@ -536,12 +880,17 @@ function getHexBattleReadout(sectorId, row, col) {
     unit.distance = distance;
     unit.range = range;
     unit.canFire = canShoot;
+    unit.intercepts = false;
     playerUnits.push(unit);
   });
 
   rivalUnits.forEach(function (unit) {
+    unit.intercepts = false;
+    /* An interceptor is in the hex by the time the volley lands, so the
+       hostile corvette's own-hex guns can answer it. */
     unit.canFire = unit.attack > 0 && playerUnits.some(function (playerUnit) {
-      return playerUnit.distance <= unit.range;
+      const engagementDistance = playerUnit.intercepts ? 0 : playerUnit.distance;
+      return engagementDistance <= unit.range;
     });
   });
 
@@ -569,7 +918,10 @@ function getHexBattleReadout(sectorId, row, col) {
     : empires.length > 1 ? "Rival coalition" : "Hostile force";
   const rivalColor = empires.length ? empires[0].color : "#ff7a7a";
   const playerInHex = playerUnits.filter(function (unit) { return unit.inHex; }).length;
-  const playerRanged = playerUnits.length - playerInHex;
+  const playerIntercepts = playerUnits.filter(function (unit) { return unit.intercepts; }).length;
+  const playerRanged = playerUnits.filter(function (unit) {
+    return !unit.inHex && !unit.intercepts;
+  }).length;
   const rivalInHex = rivalUnits.filter(function (unit) { return unit.inHex; }).length;
   const rivalRanged = rivalUnits.length - rivalInHex;
 
@@ -581,12 +933,14 @@ function getHexBattleReadout(sectorId, row, col) {
     key: key,
     inHex: playerInHex > 0 && rivalInHex > 0,
     ranged: playerRanged + rivalRanged > 0,
+    intercept: playerIntercepts,
     player: {
       ships: playerUnits.filter(function (unit) { return unit.kind === "ship"; }).map(function (unit) { return unit.ship; }),
       units: playerUnits,
       totals: playerTotals,
       label: "Your fleet",
       inHex: playerInHex,
+      intercepts: playerIntercepts,
       ranged: playerRanged,
       attackInRange: playerVolley
     },
@@ -598,6 +952,7 @@ function getHexBattleReadout(sectorId, row, col) {
       color: rivalColor,
       empires: empires,
       inHex: rivalInHex,
+      intercepts: 0,
       ranged: rivalRanged,
       attackInRange: rivalVolley
     },
@@ -622,7 +977,17 @@ function getBattleInvolvingHex(sectorId, row, col) {
   const key = hexKey(row, col);
   const localShips = sector.fleets[key] || [];
   const localStructure = sector.structures ? sector.structures[key] : null;
-  if (!localShips.length && !localStructure) return null;
+  /* A patrolling hull that already flew to a hostile hex is no longer in its
+     station key, but the station's fleet tab should still lead to the fight
+     it started. */
+  const stationedPatrols = [];
+  Object.keys(sector.fleets || {}).forEach(function (shipKey) {
+    (sector.fleets[shipKey] || []).forEach(function (ship) {
+      const station = getShipPatrolStation(ship, sector.id);
+      if (station && station.key === key) stationedPatrols.push(ship);
+    });
+  });
+  if (!localShips.length && !localStructure && !stationedPatrols.length) return null;
   for (let r = 0; r < CONFIG.sector.rows; r += 1) {
     for (let c = 0; c < CONFIG.sector.cols; c += 1) {
       if (r === row && c === col) continue;
@@ -630,7 +995,10 @@ function getBattleInvolvingHex(sectorId, row, col) {
       const battle = getHexBattleReadout(sectorId, r, c);
       if (!battle) continue;
       const includesLocal = battle.player.units.some(function (unit) {
-        if (unit.kind === "ship") return localShips.indexOf(unit.ship) !== -1;
+        if (unit.kind === "ship") {
+          return localShips.indexOf(unit.ship) !== -1 ||
+            stationedPatrols.indexOf(unit.ship) !== -1;
+        }
         return unit.structure === localStructure;
       });
       if (includesLocal) return battle;
@@ -659,7 +1027,9 @@ function collectCombatEntities() {
           col: pos.col,
           ship: ship,
           attack: getShipAttack(ship),
-          range: getShipPatrolRadius(ship),
+          /* Ships trade fire only in their own hex. A patrol's radius moves
+             the hull onto the hostile; it is not a firing range. */
+          range: getShipCombatRange(ship),
           hull: ship.hull,
           hullMax: getShipHullMax(ship),
           military: !!type.military,
@@ -684,7 +1054,7 @@ function collectCombatEntities() {
           col: pos.col,
           ship: ship,
           attack: getShipAttack(ship),
-          range: getShipPatrolRadius(ship),
+          range: getShipCombatRange(ship),
           hull: ship.hull,
           hullMax: getShipHullMax(ship),
           military: !!type.military,
@@ -976,6 +1346,9 @@ function getShipRepairBlockReason(ship, sectorId) {
 function resolveMilitaryTurn() {
   if (!state || !state.military || !state.galaxy) return null;
   const rng = state.military.rng;
+  /* Patrols respond first: a corvette whose station covers a hostile hex
+     flies onto it, then fights in the same hex as everything else. */
+  resolvePatrolInterceptions();
   const entities = collectCombatEntities();
   const attacks = [];
 
@@ -1098,6 +1471,9 @@ function resolveMilitaryTurn() {
     }
   });
 
+  /* The fight is over for any patrol whose target hex is now empty: the
+     surviving corvette flies back to its station and the red trace clears. */
+  settlePatrolInterceptions();
   const raids = resolveRaids();
   repairMilitaryUnits();
 

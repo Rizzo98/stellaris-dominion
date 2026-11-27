@@ -115,6 +115,15 @@ function reset() {
   run("state = createInitialState(null); state.phase = 'actions'; state.ethic = 'militarist';");
 }
 
+/* An adjacent pair of empty hexes, used by the patrol and battle tests. */
+function findAdjacentEmptyPair() {
+  return run("(function(){ for(let r=0;r<CONFIG.sector.rows;r+=1){ for(let c=0;c<CONFIG.sector.cols;c+=1){ if(getSystemAtHex(r,c,'sec-core')||getStructureAt(r,c,'sec-core')) continue; const ns=getNeighbors(r,c); for(let i=0;i<ns.length;i+=1){ const n=ns[i]; if(getSystemAtHex(n[0],n[1],'sec-core')||getStructureAt(n[0],n[1],'sec-core')) continue; return {hr:r,hc:c,pr:n[0],pc:n[1]}; } } } return null; })()");
+}
+
+function clearSectorFleets() {
+  run("(function(){ const s=getSector('sec-core'); s.fleets={}; s.rivalFleets={}; })()");
+}
+
 function testSpawn() {
   reset();
   const empires = run("state.empires");
@@ -294,17 +303,143 @@ function testPatrolCoverage() {
 
 function testPatrolCombat() {
   reset();
-  run("(function(){ const s=getSector('sec-core'); s.fleets[hexKey(0,0)]=[createShip('corvette',{id:'test-a',name:'Test A',patrol:true})]; s.rivalFleets[hexKey(0,1)]=[createShip('corvette',{id:'test-r',name:'Rival',owner:state.empires[0].id,patrol:true})]; })()");
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); s.fleets[hexKey(0,0)]=[createShip('corvette',{id:'test-a',name:'Test A',patrol:true})]; s.rivalFleets[hexKey(0,1)]=[createShip('corvette',{id:'test-r',name:'Rival',owner:state.empires[0].id})]; })()");
   run("resolveMilitaryTurn()");
-  eq(run("getFleetAt(0,0).find(s=>s.id==='test-a').hull"), 3, "patrol corvette takes return fire");
-  eq(run("getRivalFleetAt(0,1).find(s=>s.id==='test-r').hull"), 3, "rival patrol takes patrol fire");
+  eq(run("getFleetAt(0,1).find(s=>s.id==='test-a').hull"), 3, "the patrol takes return fire in the hostile hex");
+  eq(run("getRivalFleetAt(0,1).find(s=>s.id==='test-r').hull"), 3, "the stationary rival takes the patrol's fire");
+  eq(run("getFleetAt(0,0).length"), 0, "the patrol leaves its station to fight");
   run("resolveMilitaryTurn(); resolveMilitaryTurn();");
-  eq(run("getFleetAt(0,0).filter(s=>s.id==='test-a').length"), 0, "destroyed corvette leaves the fleet");
+  eq(run("getFleetAt(0,1).filter(s=>s.id==='test-a').length"), 0, "destroyed corvette leaves the fleet");
   eq(run("getRivalFleetAt(0,1).filter(s=>s.id==='test-r').length"), 0, "destroyed rival leaves its fleet");
   eq(run("state.military.kills"), 1, "player kill counted");
   eq(run("state.military.losses"), 1, "player loss counted");
   ok(run("state.military.salvage >= 2"), "salvage awarded for a destroyed rival");
   ok(run("state.military.log.length > 0"), "combat writes a military dispatch");
+
+  /* Two patrols facing each other meet in one hex instead of swapping. */
+  reset();
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); s.fleets[hexKey(0,0)]=[createShip('corvette',{id:'meet-a',name:'Meet A',patrol:true})]; s.rivalFleets[hexKey(0,1)]=[createShip('corvette',{id:'meet-r',name:'Meet R',owner:state.empires[0].id,patrol:true})]; })()");
+  run("resolveMilitaryTurn()");
+  eq(run("getFleetAt(0,1).find(s=>s.id==='meet-a').hull"), 3, "the moving patrol meets the rival in its hex");
+  eq(run("getRivalFleetAt(0,1).find(s=>s.id==='meet-r').hull"), 3, "the rival station holds and fights");
+}
+
+function testPatrolInterception() {
+  reset();
+  const pair = findAdjacentEmptyPair();
+  ok(!!pair, "found two adjacent empty hexes for the patrol interception test");
+  const stationKey = pair.pr + "," + pair.pc;
+  const hostileKey = pair.hr + "," + pair.hc;
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); s.fleets['" + stationKey + "']=[createShip('corvette',{id:'ic-a',name:'Aegis',patrol:true})]; s.rivalFleets['" + hostileKey + "']=[createShip('corvette',{id:'ic-r',name:'Talon',owner:state.empires[0].id})]; })()");
+
+  const zoneBefore = run("Object.keys(getSectorPatrolCoverage('sec-core').zones).sort().join('|')");
+  const before = run("getHexBattleReadout('sec-core'," + pair.hr + "," + pair.hc + ")");
+  ok(!!before, "a patrol in range of a hostile hex produces an interception readout");
+  eq(before.inHex, false, "the patrol has not moved yet");
+  eq(before.ranged, false, "an interceptor is not a ranged defender");
+  eq(before.intercept, 1, "the readout projects one interceptor");
+  eq(before.player.intercepts, 1, "the patrol is counted as an interceptor");
+  eq(before.player.units[0].distance, 1, "the interceptor is one hex from the hostile hex");
+  eq(before.player.units[0].canFire, true, "the interceptor joins the player volley");
+  eq(before.rival.units[0].canFire, true, "the hostile corvette can return fire in-hex");
+  eq(before.player.attackInRange, 2, "the interceptor brings its 2 ATK");
+  eq(before.rival.attackInRange, 2, "the hostile corvette returns 2 ATK");
+  eq(before.forecast.playerHullAfter, 3, "the forecast shows the patrol taking return fire");
+  eq(before.forecast.rivalHullAfter, 3, "the forecast shows the hostile taking the patrol's fire");
+  eq(before.forecast.label, "EVEN EXCHANGE", "an interceptor fight is an even exchange");
+  eq(run("getPlayerDefenseCoverageAt('sec-core'," + pair.pr + "," + pair.pc + ").length"), 1,
+    "the patrol covers its own station before it moves");
+
+  run("resolveMilitaryTurn()");
+  eq(run("getFleetAt(" + pair.pr + "," + pair.pc + ").length"), 0, "the corvette leaves its station");
+  const corvette = run("getFleetAt(" + pair.hr + "," + pair.hc + ").find(s=>s.id==='ic-a')");
+  eq(corvette.hull, 3, "the patrol takes normal return fire");
+  eq(corvette.patrol, true, "the corvette keeps its patrol stance");
+  eq(corvette.patrolHomeKey, stationKey, "the station is remembered");
+  eq(corvette.patrolTargetKey, hostileKey, "the engagement hex is remembered");
+  eq(run("getRivalFleetAt(" + pair.hr + "," + pair.hc + ").find(s=>s.id==='ic-r').hull"), 3,
+    "the hostile corvette takes the patrol's fire");
+  eq(run("getShipPatrolStatus(getFleetAt(" + pair.hr + "," + pair.hc + ")[0],'sec-core'," + pair.hr + "," + pair.hc + ")"),
+    "engaging", "the corvette reports an engagement in the hostile hex");
+  eq(run("isHexExplored(" + pair.hr + "," + pair.hc + ",'sec-core')"), true,
+    "the intercept charts the hostile hex it enters");
+  const excursion = run("getPatrolExcursion(getFleetAt(" + pair.hr + "," + pair.hc + ")[0],'sec-core','" + hostileKey + "')");
+  ok(!!excursion, "the away corvette leaves a temporary trace");
+  eq(excursion.homeKey, stationKey, "the trace starts at the patrol station");
+  eq(excursion.route[excursion.route.length - 1], hostileKey, "the trace ends in the hostile hex");
+  eq(run("Object.keys(getSectorPatrolCoverage('sec-core').zones).sort().join('|')"), zoneBefore,
+    "patrol coverage stays anchored on the station while the corvette is away");
+  eq(run("getPlayerDefenseCoverageAt('sec-core'," + pair.pr + "," + pair.pc + ").length"), 1,
+    "the station is still covered while the corvette is away");
+  const inHex = run("getHexBattleReadout('sec-core'," + pair.hr + "," + pair.hc + ")");
+  eq(inHex.inHex, true, "after the move the battle is a normal in-hex fight");
+  eq(inHex.intercept, 0, "the arrived corvette is no longer an interceptor");
+
+  /* A single hull point left: the corvette survives and flies home in the
+     same resolution, clearing the trace. */
+  run("getRivalFleetAt(" + pair.hr + "," + pair.hc + ")[0].hull = 1;");
+  run("resolveMilitaryTurn()");
+  eq(run("getRivalFleetAt(" + pair.hr + "," + pair.hc + ").length"), 0, "the hostile corvette is destroyed");
+  const returning = run("getFleetAt(" + pair.pr + "," + pair.pc + ").find(s=>s.id==='ic-a')");
+  ok(!!returning, "the surviving corvette returns to its station");
+  eq(returning.hull, 1, "the corvette kept the damage it took");
+  eq(returning.patrolTargetKey, undefined, "the engagement target is cleared on return");
+  eq(run("getPatrolExcursion(getFleetAt(" + pair.pr + "," + pair.pc + ")[0],'sec-core','" + stationKey + "')"), null,
+    "the temporary trace is removed at the station");
+  eq(run("getShipPatrolStatus(getFleetAt(" + pair.pr + "," + pair.pc + ")[0],'sec-core'," + pair.pr + "," + pair.pc + ")"),
+    "station", "the returned corvette is back on station");
+  eq(run("state.military.kills"), 1, "the interception kill is counted");
+
+  /* Out of range: the zone does not grow and the corvette does not chase. */
+  reset();
+  clearSectorFleets();
+  const far = run("(function(){ for(let r=0;r<CONFIG.sector.rows;r+=1){ for(let c=0;c<CONFIG.sector.cols;c+=1){ if(getSystemAtHex(r,c,'sec-core')||getStructureAt(r,c,'sec-core')) continue; const cells=hexesWithinRadius(r,c,2); for(let i=0;i<cells.length;i+=1){ const n=cells[i]; if(hexDistance(r,c,n[0],n[1])!==2) continue; if(getSystemAtHex(n[0],n[1],'sec-core')||getStructureAt(n[0],n[1],'sec-core')) continue; return {pr:r,pc:c,hr:n[0],hc:n[1]}; } } } return null; })()");
+  ok(!!far, "found a hostile hex two hexes from the patrol station");
+  run("(function(){ const s=getSector('sec-core'); s.fleets['" + far.pr + "," + far.pc + "']=[createShip('corvette',{id:'far-a',name:'Far',patrol:true})]; s.rivalFleets['" + far.hr + "," + far.hc + "']=[createShip('corvette',{id:'far-r',name:'Far Rival',owner:state.empires[0].id})]; })()");
+  eq(run("getHexBattleReadout('sec-core'," + far.hr + "," + far.hc + ")"), null,
+    "a hostile outside radius 1 produces no interception readout");
+  run("resolveMilitaryTurn()");
+  ok(!!run("getFleetAt(" + far.pr + "," + far.pc + ").find(s=>s.id==='far-a')"), "the corvette holds its station out of range");
+  eq(run("getRivalFleetAt(" + far.hr + "," + far.hc + ").find(s=>s.id==='far-r').hull"), 5,
+    "an out-of-range hostile takes no patrol fire");
+
+  /* Two hostile hexes inside the zone: only the chosen intercept is drawn. */
+  reset();
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); s.fleets[hexKey(2,3)]=[createShip('corvette',{id:'multi-a',name:'Multi',patrol:true})]; })()");
+  const multiTargets = run("getNeighbors(2,3).slice(0,2)");
+  eq(multiTargets.length, 2, "the multi-target setup has two neighbouring hexes");
+  run("(function(){ const s=getSector('sec-core'); const e=state.empires[0]; s.rivalFleets[hexKey(" + multiTargets[0][0] + "," + multiTargets[0][1] + ")]=[createShip('corvette',{id:'multi-r1',owner:e.id})]; s.rivalFleets[hexKey(" + multiTargets[1][0] + "," + multiTargets[1][1] + ")]=[createShip('corvette',{id:'multi-r2',owner:e.id})]; })()");
+  const multiA = run("getHexBattleReadout('sec-core'," + multiTargets[0][0] + "," + multiTargets[0][1] + ")");
+  const multiB = run("getHexBattleReadout('sec-core'," + multiTargets[1][0] + "," + multiTargets[1][1] + ")");
+  eq((multiA ? multiA.intercept : 0) + (multiB ? multiB.intercept : 0), 1,
+    "only the chosen hostile hex projects the patrol intercept");
+
+  /* Rival patrols use the same response: they fly at a player hull. */
+  reset();
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); s.fleets[hexKey(0,0)]=[createShip('corvette',{id:'rp-player',name:'Player',hull:5})]; s.rivalFleets[hexKey(0,1)]=[createShip('corvette',{id:'rp-rival',name:'Rival',owner:state.empires[0].id,patrol:true})]; })()");
+  run("resolveMilitaryTurn()");
+  eq(run("getFleetAt(0,0).find(s=>s.id==='rp-player').hull"), 3, "a rival patrol flies in and takes return fire");
+  eq(run("getRivalFleetAt(0,0).find(s=>s.id==='rp-rival').hull"), 3, "the player corvette returns fire in its hex");
+
+  /* An engaged hostile does not walk out of the fight. */
+  reset();
+  clearSectorFleets();
+  const pinnedPair = findAdjacentEmptyPair();
+  const pinnedKey = pinnedPair.pr + "," + pinnedPair.pc;
+  const escapeKey = pinnedPair.hr + "," + pinnedPair.hc;
+  run("(function(){ const s=getSector('sec-core'); const e=state.empires[0]; s.fleets['" + pinnedKey + "']=[createShip('corvette',{id:'pin-a',name:'Pin',patrol:true})]; const raider=createShip('corvette',{id:'pin-r',name:'Raider',owner:e.id}); raider.path=['" + escapeKey + "']; raider.pathSectorId='sec-core'; s.rivalFleets['" + pinnedKey + "']=[raider]; })()");
+  run("advanceRivalFleets()");
+  ok(!!run("getRivalFleetAt(" + pinnedPair.pr + "," + pinnedPair.pc + ").find(s=>s.id==='pin-r')"),
+    "a hostile engaged by a patrol holds the contested hex");
+  run("(function(){ const s=getSector('sec-core'); delete s.fleets['" + pinnedKey + "']; })()");
+  run("advanceRivalFleets()");
+  ok(!!run("getRivalFleetAt(" + pinnedPair.hr + "," + pinnedPair.hc + ").find(s=>s.id==='pin-r')"),
+    "the hostile moves again once the patrol is gone");
 }
 
 function testStronghold() {
@@ -341,12 +476,30 @@ function testPlayerPatrolOrder() {
   run("setSelectedShipsPatrol(true)");
   eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrol"), true,
     "SET PATROL puts the selected corvette on station");
+  eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrolHomeKey"), "2,3",
+    "SET PATROL anchors the station in the current hex");
+  eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrolHomeSectorId"), "sec-core",
+    "the station remembers its sector");
   run("state.ui.move = {sectorId:'sec-core', from:hexKey(2,3), ids:['" + shipId + "'], stops:[], previewPath:['1,3'], previewDestination:'1,3'};");
   run("completeFleetMove('1,3')");
   eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrol"), false,
     "assigning a route stands the corvette down");
+  eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrolHomeKey"), undefined,
+    "assigning a route clears the patrol station");
+  eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrolTargetKey"), undefined,
+    "assigning a route clears any engagement target");
   ok(run("!!getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').path"),
     "the route is still assigned");
+
+  /* Re-issuing SET PATROL must not move an away hull's station. */
+  reset();
+  clearSectorFleets();
+  run("(function(){ const s=getSector('sec-core'); const away=createShip('corvette',{id:'away-patrol',patrol:true}); away.patrolHomeKey='0,0'; away.patrolHomeSectorId='sec-core'; s.fleets[hexKey(0,1)]=[away,createShip('corvette',{id:'fresh-patrol'})]; state.ui.activeSector='sec-core'; state.ui.selectedHex=hexKey(0,1); state.ui.shipSelection=['away-patrol','fresh-patrol']; })()");
+  run("setSelectedShipsPatrol(true)");
+  eq(run("getFleetAt(0,1).find(s=>s.id==='away-patrol').patrolHomeKey"), "0,0",
+    "an already-patrolling hull keeps its original station");
+  eq(run("getFleetAt(0,1).find(s=>s.id==='fresh-patrol').patrolHomeKey"), "0,1",
+    "a fresh patrol order anchors at the order hex");
 }
 
 function testBuilderStronghold() {
@@ -505,38 +658,42 @@ function testBattleReadout() {
     "a hex with only one fleet has no battle readout");
 }
 
-/* Ranged defence: patrols and strongholds fire across hexes, stationary
-   hulls may have no return fire, and the defended hex must still find the
-   engagement for its fleet-tab callout. */
+/* Patrol interception and stronghold range: a patrol on station flies into
+   the hostile hex, so the readout projects an in-hex exchange with return
+   fire; a stronghold keeps the true one-sided ranged volley. The defended
+   hex must still find the engagement for its fleet-tab callout. */
 function testRangedBattleReadout() {
   reset();
-  run("(function(){ const s=getSector('sec-core'); const home=state.systems.find(function(x){return x.home;}); delete s.fleets[hexKey(home.row,home.col)]; })()");
-  const pair = run("(function(){ for(let r=0;r<CONFIG.sector.rows;r+=1){ for(let c=0;c<CONFIG.sector.cols;c+=1){ if(getSystemAtHex(r,c,'sec-core')||getStructureAt(r,c,'sec-core')) continue; const ns=getNeighbors(r,c); for(let i=0;i<ns.length;i+=1){ const n=ns[i]; if(getSystemAtHex(n[0],n[1],'sec-core')||getStructureAt(n[0],n[1],'sec-core')) continue; return {hr:r,hc:c,pr:n[0],pc:n[1]}; } } } return null; })()");
-  ok(!!pair, "found two adjacent empty hexes for the ranged test");
+  clearSectorFleets();
+  const pair = findAdjacentEmptyPair();
+  ok(!!pair, "found two adjacent empty hexes for the interception test");
   const hostileKey = pair.hr + "," + pair.hc;
   const patrolKey = pair.pr + "," + pair.pc;
   run("(function(){ const s=getSector('sec-core'); const e=state.empires[0]; s.fleets['" + patrolKey + "']=[createShip('corvette',{id:'ranged-patrol',patrol:true})]; s.rivalFleets['" + hostileKey + "']=[createShip('corvette',{id:'ranged-raider',owner:e.id})]; })()");
 
   const battle = run("getHexBattleReadout('sec-core'," + pair.hr + "," + pair.hc + ")");
-  ok(!!battle, "a patrol in range of a hostile hex produces a ranged readout");
-  eq(battle.inHex, false, "no player unit stands in the hostile hex");
-  eq(battle.ranged, true, "the readout is tagged as ranged");
-  eq(battle.player.ranged, 1, "the patrol is counted as a ranged unit");
+  ok(!!battle, "a patrol in range of a hostile hex produces an interception readout");
+  eq(battle.inHex, false, "no player unit stands in the hostile hex yet");
+  eq(battle.ranged, false, "the patrol is not a ranged defender");
+  eq(battle.intercept, 1, "the readout projects one interceptor");
+  eq(battle.player.ranged, 0, "the patrol is not counted as a ranged unit");
+  eq(battle.player.intercepts, 1, "the patrol is counted as an interceptor");
   eq(battle.rival.ranged, 0, "the hostile corvette is inside the contested hex");
   eq(battle.player.totals.ships, 1, "the patrol joins the player order of battle");
   eq(battle.rival.totals.ships, 1, "the hostile corvette joins the enemy order of battle");
-  eq(battle.player.units[0].canFire, true, "the patrol has a firing solution");
-  eq(battle.rival.units[0].canFire, false, "the stationary corvette cannot reach the patrol");
+  eq(battle.player.units[0].canFire, true, "the interceptor joins the player volley");
+  eq(battle.player.units[0].intercepts, true, "the unit is tagged as an interceptor");
+  eq(battle.player.units[0].inHex, false, "the interceptor is shown at its station before the move");
+  eq(battle.rival.units[0].canFire, true, "the stationary corvette returns fire in-hex");
   eq(battle.player.units[0].distance, 1, "the patrol is one hex from the battle");
   eq(battle.player.attackInRange, 2, "the patrol attack enters the player volley");
-  eq(battle.rival.attackInRange, 0, "the hostile volley has no firing solution");
+  eq(battle.rival.attackInRange, 2, "the hostile return fire enters the enemy volley");
   eq(battle.forecast.playerStrike.attack, 2, "the forecast player volley is 2 ATK");
-  eq(battle.forecast.enemyStrike.attack, 0, "the forecast enemy volley is empty");
-  eq(battle.forecast.playerHullAfter, 5, "the patrol takes no return fire");
+  eq(battle.forecast.enemyStrike.attack, 2, "the forecast enemy volley is 2 ATK");
+  eq(battle.forecast.playerHullAfter, 3, "the forecast makes the patrol take return fire");
   eq(battle.forecast.rivalHullAfter, 3, "the hostile corvette loses 2 hull");
-  ok(battle.balance.playerPercent > 50, "the balance favours the firing patrol");
-  eq(battle.balance.leader, "player", "the balance leader is the player");
-  eq(battle.forecast.label, "PLAYER WINS THE EXCHANGE", "the patrol wins the projected exchange");
+  eq(battle.balance.leader, "even", "the interception starts as an even exchange");
+  eq(battle.forecast.label, "EVEN EXCHANGE", "the interceptor fight is an even exchange");
 
   eq(run("isHexExplored(" + pair.hr + "," + pair.hc + ",'sec-core')"), false,
     "a rival fleet alone does not chart its hex");
@@ -544,17 +701,19 @@ function testRangedBattleReadout() {
     "an uncharted hostile hex does not leak the engagement into the defended hex");
   run("markHexExplored(" + pair.hr + "," + pair.hc + ",'sec-core')");
   const linked = run("getBattleInvolvingHex('sec-core'," + pair.pr + "," + pair.pc + ")");
-  ok(!!linked, "the defended hex finds the engagement once it is charted");
+  ok(!!linked, "the station hex finds the engagement once it is charted");
   eq(linked.row, pair.hr, "the callout anchor row is the hostile hex");
   eq(linked.col, pair.hc, "the callout anchor column is the hostile hex");
 
   run("resolveMilitaryTurn()");
   eq(run("getRivalFleetAt(parseHexKey('" + hostileKey + "').row,parseHexKey('" + hostileKey + "').col,'sec-core').find(function(s){return s.id==='ranged-raider';}).hull"), 3,
     "the patrol's 2 ATK lands on the raider");
-  eq(run("getFleetAt(parseHexKey('" + patrolKey + "').row,parseHexKey('" + patrolKey + "').col,'sec-core').find(function(s){return s.id==='ranged-patrol';}).hull"), 5,
-    "the raider deals no return fire");
+  eq(run("getFleetAt(parseHexKey('" + hostileKey + "').row,parseHexKey('" + hostileKey + "').col,'sec-core').find(function(s){return s.id==='ranged-patrol';}).hull"), 3,
+    "the raider's 2 ATK lands on the patrol");
   const afterVolley = run("getHexBattleReadout('sec-core'," + pair.hr + "," + pair.hc + ")");
   ok(!!afterVolley, "the engagement remains after the first volley");
+  eq(afterVolley.inHex, true, "the corvette now stands in the hostile hex");
+  eq(afterVolley.intercept, 0, "the arrived corvette is no longer an interceptor");
   eq(afterVolley.forecast.rivalHullAfter, 1, "the next forecast follows the damaged hull");
 
   reset();
@@ -591,6 +750,21 @@ function testRangedBattleReadout() {
   eq(reverse.forecast.enemyStrike.attack, 3, "the stronghold volley is forecast");
   eq(reverse.balance.leader, "rival", "the balance favours the firing stronghold");
   eq(reverse.forecast.label, "ENEMY WINS THE EXCHANGE", "the hostile stronghold wins the projected exchange");
+
+  /* A lone hostile stronghold is a ranged battery, not an interception
+     target: the patrol is a target, not an interceptor. */
+  reset();
+  clearSectorFleets();
+  const lonePair = findAdjacentEmptyPair();
+  ok(!!lonePair, "found adjacent empty hexes for the lone-stronghold test");
+  run("(function(){ const s=getSector('sec-core'); const e=state.empires[0]; s.fleets['" + lonePair.pr + "," + lonePair.pc + "']=[createShip('corvette',{id:'lone-patrol',patrol:true})]; s.structures['" + lonePair.hr + "," + lonePair.hc + "']={type:'stronghold',owner:e.id,underConstruction:false,startedTurn:1,hull:10}; })()");
+  const lone = run("getHexBattleReadout('sec-core'," + lonePair.hr + "," + lonePair.hc + ")");
+  ok(!!lone, "a hostile stronghold firing at a patrol produces a readout");
+  eq(lone.intercept, 0, "a lone stronghold does not drag the patrol off station");
+  eq(lone.player.units[0].intercepts, false, "the patrol is not projected as an interceptor");
+  eq(lone.player.units[0].canFire, false, "the patrol has no firing solution at range");
+  eq(lone.rival.attackInRange, 3, "the stronghold keeps its 3 ATK battery");
+  eq(lone.forecast.playerStrike.attack, 0, "the patrol contributes no volley");
 
   reset();
   run("(function(){ const s=getSector('sec-core'); const home=state.systems.find(function(x){return x.home;}); delete s.fleets[hexKey(home.row,home.col)]; })()");
@@ -633,6 +807,7 @@ try {
   testRivalLandingJump();
   testPatrolCoverage();
   testPatrolCombat();
+  testPatrolInterception();
   testStronghold();
   testRaidCoverage();
   testPlayerPatrolOrder();

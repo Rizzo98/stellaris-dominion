@@ -194,10 +194,12 @@ const CONFIG = {
   turnTickMs: 620,
 
   /* Military rules shared by player patrols, strongholds and the AI.
-     A patrolling corvette fires on a hostile within its radius each turn;
-     a stronghold is a static defender with the same rules at radius 2.
-     Ships also trade fire with hostiles in their own hex even when not
-     patrolling. Patrol coverage also blocks colony raids in its hexes. */
+     A patrolling corvette keeps a station: when a hostile ship enters its
+     radius it flies onto that hex, fights there like any in-hex unit and
+     returns when the fight ends. A stronghold is a static defender that
+     genuinely fires across radius 2. Ships trade fire in their own hex even
+     when not patrolling. Patrol coverage also blocks colony raids in its
+     hexes; the zone stays on the station while the hull is away. */
   military: {
     patrolRadius: 1,
     repairPerTurn: 2,

@@ -1,6 +1,7 @@
 /* ============================================================
    HEX MAP — SVG rendering of the current sector: orbital structures,
-   rival systems and hulls, patrol zones, route previews and moving paths.
+   rival systems and hulls, patrol zones and temporary patrol traces,
+   route previews and moving paths.
    ============================================================ */
 
 function hexCenter(row, col) {
@@ -148,7 +149,7 @@ function battleBadge(x, y, battle, interactive) {
   const rivalCount = battle.rival.totals.count;
   const playerKind = battle.player.totals.structures ? " player combatant" : " player ship";
   const rivalKind = battle.rival.totals.structures ? " hostile combatant" : " hostile ship";
-  const kind = battle.inHex ? "Battle" : "Ranged defence";
+  const kind = battle.intercept ? "Patrol intercept" : battle.inHex ? "Battle" : "Ranged defence";
   const label = kind + " in progress: " + playerCount +
     (playerCount === 1 ? playerKind : playerKind + "s") + " against " + rivalCount +
     (rivalCount === 1 ? rivalKind : rivalKind + "s") + ". Open the battle forecast.";
@@ -165,6 +166,25 @@ function battleBadge(x, y, battle, interactive) {
       '<text x="' + cx + '" y="' + (y + 0.4).toFixed(1) + '">⚔</text>' +
     '</g>'
   );
+}
+
+/* The temporary red trace a patrol leaves while it is away from its
+   station. Two corvettes from the same post share one line, and the line
+   disappears with the last hull's return. */
+function collectPatrolTraces(sector) {
+  const seen = new Set();
+  const traces = [];
+  Object.keys(sector.fleets || {}).forEach(function (key) {
+    (sector.fleets[key] || []).forEach(function (ship) {
+      const excursion = getPatrolExcursion(ship, sector.id, key);
+      if (!excursion) return;
+      const signature = excursion.homeKey + ">" + excursion.route.join(">");
+      if (seen.has(signature)) return;
+      seen.add(signature);
+      traces.push(excursion);
+    });
+  });
+  return traces;
 }
 
 /* Rival routes are line art only and are visible once their start hex is
@@ -516,13 +536,23 @@ function renderMap() {
         const composition = getFleetCompositionText(fleet);
         label += ", fleet of " + fleet.length + (fleet.length === 1 ? " ship" : " ships") +
           (composition ? " (" + composition + ")" : "");
+        const awayPatrol = fleet.find(function (ship) {
+          const home = getShipPatrolStation(ship, sector.id);
+          return !!home && (home.row !== row || home.col !== col);
+        });
+        if (awayPatrol) {
+          const home = getShipPatrolStation(awayPatrol, sector.id);
+          label += ", patrolling corvette away from its station at hex " +
+            (home.row + 1) + ":" + (home.col + 1);
+        }
       }
       if (rivalFleet.length) {
         label += ", " + rivalFleet.length + " hostile " + (rivalFleet.length === 1 ? "ship" : " ships") +
           (rivalFleetEmpire ? " from " + rivalFleetEmpire.name : "");
       }
       if (battle) {
-        label += ", " + (battle.inHex ? "battle in progress" : "ranged defence in progress") +
+        label += ", " + (battle.intercept ? "patrol intercept in progress"
+          : battle.inHex ? "battle in progress" : "ranged defence in progress") +
           "; open the war icon for the battle forecast";
       }
       if (patrolZone) label += ", covered by a friendly patrol or stronghold";
@@ -690,6 +720,14 @@ function renderMap() {
     const dest = hexCenter(destPos.row, destPos.col);
     routePieces.push('<polyline class="enemy-route-line" points="' + routePoints(route.startKey, route.path) + '"></polyline>');
     routePieces.push('<circle class="enemy-route-end" cx="' + dest.x.toFixed(1) + '" cy="' + dest.y.toFixed(1) + '" r="3.6"></circle>');
+  });
+  /* The patrol trace is temporary line art: station -> hull, cleared as soon
+     as the corvette is back on station. */
+  collectPatrolTraces(sector).forEach(function (trace) {
+    const endPos = parseHexKey(trace.route[trace.route.length - 1]);
+    const end = hexCenter(endPos.row, endPos.col);
+    routePieces.push('<polyline class="patrol-trace-line" points="' + routePoints(trace.homeKey, trace.route) + '"></polyline>');
+    routePieces.push('<circle class="patrol-trace-end" cx="' + end.x.toFixed(1) + '" cy="' + end.y.toFixed(1) + '" r="3.2"></circle>');
   });
   if (previewPath.length && move) {
     const destPos = parseHexKey(previewDestination);

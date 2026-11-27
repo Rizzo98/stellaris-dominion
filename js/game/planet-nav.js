@@ -239,6 +239,7 @@ function orderFleetMove(move, path) {
     }
     /* A ship leaving its station abandons patrol coverage. */
     ship.patrol = false;
+    clearShipPatrolStation(ship);
   });
 
   const slowest = moving.reduce(function (max, ship) {
@@ -346,6 +347,7 @@ function jumpFleetToSector(targetId) {
     delete ship.pathSectorId;
     delete ship.pathStops;
     ship.patrol = false;
+    clearShipPatrolStation(ship);
   });
 
   /* The destination is the port facing the origin sector, not a generic

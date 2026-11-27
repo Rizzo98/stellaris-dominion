@@ -1,10 +1,11 @@
 /* ============================================================
    BATTLE VIEW — dedicated engagement sheet
    A single balance bar, both fleet manifests with live hull/stats and a
-   one-turn concentrated-fire forecast. Ranged defences (patrols and
-   strongholds firing into a hostile hex) use the same sheet: out-of-hex
-   units show their distance and only units with a firing solution join a
-   volley. Read-only: combat still resolves when the turn ends.
+   one-turn concentrated-fire forecast. A patrol on station that will fly
+   into the hostile hex is projected as an in-hex combatant (tag INTERCEPT)
+   so the forecast includes the hostile return fire; strongholds firing from
+   range stay out-of-hex units. Read-only: combat still resolves when the
+   turn ends.
    ============================================================ */
 
 function battleUnitHullPercent(unit) {
@@ -39,16 +40,20 @@ function battleUnitRowHTML(unit) {
   const percentile = battleUnitHullPercent(unit);
   const tag = unit.kind === "structure"
     ? "STATIC"
-    : !unit.inHex
-      ? (unit.canFire ? "RANGED" : "TARGETED")
-      : unit.attack > 0 && !unit.canFire
-        ? "NO RANGE"
-        : damaged ? "DAMAGED" : unit.patrol ? "PATROL" : unit.side === "player" ? "READY" : "HOSTILE";
+    : unit.intercepts
+      ? "INTERCEPT"
+      : !unit.inHex
+        ? (unit.canFire ? "RANGED" : "TARGETED")
+        : unit.attack > 0 && !unit.canFire
+          ? "NO RANGE"
+          : damaged ? "DAMAGED" : unit.patrol ? "PATROL" : unit.side === "player" ? "READY" : "HOSTILE";
   const tagClass = unit.kind === "structure"
     ? ""
-    : !unit.inHex
-      ? (unit.canFire ? " ranged" : " targeted")
-      : unit.attack > 0 && !unit.canFire ? " no-range" : "";
+    : unit.intercepts
+      ? " intercept"
+      : !unit.inHex
+        ? (unit.canFire ? " ranged" : " targeted")
+        : unit.attack > 0 && !unit.canFire ? " no-range" : "";
   const owner = unit.empire
     ? unit.empire.name
     : unit.kind === "structure" ? "Player stronghold" : unit.role;
@@ -88,13 +93,16 @@ function battleFleetCardHTML(battle, side) {
   const data = battle[side];
   const totals = data.totals;
   const isPlayer = side === "player";
-  const label = isPlayer ? (data.inHex > 0 ? "YOUR FLEET" : "YOUR DEFENCE") : data.label.toUpperCase();
+  const label = isPlayer
+    ? (data.inHex > 0 ? "YOUR FLEET" : data.intercepts > 0 ? "PATROL RESPONSE" : "YOUR DEFENCE")
+    : data.label.toUpperCase();
   const emblem = isPlayer ? "▲" : "⚑";
   const composition = battleCompositionText(data.units);
   const patrols = data.units.filter(function (unit) {
     return unit.kind === "ship" && unit.patrol;
   }).length;
-  const ranged = data.units.filter(function (unit) { return !unit.inHex; }).length;
+  const intercepts = data.units.filter(function (unit) { return unit.intercepts; }).length;
+  const ranged = data.units.filter(function (unit) { return !unit.inHex && !unit.intercepts; }).length;
   const countText = totals.ships + (totals.ships === 1 ? " SHIP" : " SHIPS") +
     (totals.structures ? " + " + totals.structures + " STATIC" : "");
   const style = isPlayer ? "" : ' style="--rival-color:' + battle.rival.color + '"';
@@ -107,6 +115,7 @@ function battleFleetCardHTML(battle, side) {
           '<b>' + countText + '</b>' +
           '<span class="battle-fleet-composition">' + composition +
             (patrols ? " · " + patrols + " on patrol" : "") +
+            (intercepts ? " · " + intercepts + " intercepting" : "") +
             (ranged ? " · " + ranged + " at range" : "") + '</span>' +
         '</span>' +
       '</div>' +
@@ -147,8 +156,11 @@ function battleHeroHTML(battle) {
   const playerText = battleForceText(player, true);
   const rivalText = battleForceText(rival, false);
   let copy = "Your " + playerText + " vs " + rivalText + " from " + enemyText + ".";
+  if (battle.intercept) {
+    copy += " A patrol on station flies into this hex before the volley, so both sides trade fire at close range.";
+  }
   if (battle.ranged) {
-    copy += " Units outside this hex join only with a firing solution.";
+    copy += " Static defences outside this hex join only with a firing solution.";
     if (!battle.forecast.enemyStrike.attack) copy += " The hostiles cannot return fire.";
     else if (!battle.forecast.playerStrike.attack) copy += " Your units cannot return fire.";
   }
@@ -157,7 +169,8 @@ function battleHeroHTML(battle) {
     '<div class="battle-hero" style="--rival-color:' + battle.rival.color + '">' +
       '<span class="battle-hero-emblem" aria-hidden="true">⚔</span>' +
       '<span class="battle-hero-main">' +
-        '<span class="kicker">' + (battle.inHex ? "IN-HEX ENGAGEMENT" : "RANGED ENGAGEMENT") +
+        '<span class="kicker">' + (battle.intercept ? "PATROL INTERCEPT"
+          : battle.inHex ? "IN-HEX ENGAGEMENT" : "RANGED ENGAGEMENT") +
           ' · HEX ' + (battle.row + 1) + ':' + (battle.col + 1) + '</span>' +
         '<strong class="battle-hero-title">' + (player.ships || player.count) + ' <small>vs</small> ' +
           (rival.ships || rival.count) + '</strong>' +
@@ -289,14 +302,23 @@ function battleCalloutHTML(battle, local) {
   const rivalCount = battle.rival.totals.ships || battle.rival.totals.count;
   const hasStatic = battle.player.totals.structures > 0 || battle.rival.totals.structures > 0;
   const elsewhere = !!local && (local.row !== battle.row || local.col !== battle.col);
-  const ranged = elsewhere || !battle.inHex;
-  const kicker = elsewhere
-    ? "RANGED DEFENCE · HEX " + (battle.row + 1) + ":" + (battle.col + 1)
-    : ranged ? "RANGED DEFENCE" : "BATTLE IN PROGRESS";
+  const intercept = battle.intercept > 0;
+  const ranged = !intercept && battle.ranged && (elsewhere || !battle.inHex);
+  const patrolElsewhere = elsewhere && !ranged &&
+    battle.player.units.some(function (unit) { return unit.kind === "ship" && unit.patrol; });
+  const kicker = intercept
+    ? "PATROL INTERCEPT" + (elsewhere ? " · HEX " + (battle.row + 1) + ":" + (battle.col + 1) : "")
+    : ranged
+      ? "RANGED DEFENCE" + (elsewhere ? " · HEX " + (battle.row + 1) + ":" + (battle.col + 1) : "")
+      : patrolElsewhere
+        ? "PATROL ENGAGED · HEX " + (battle.row + 1) + ":" + (battle.col + 1)
+        : elsewhere
+          ? "ENGAGEMENT · HEX " + (battle.row + 1) + ":" + (battle.col + 1)
+          : "BATTLE IN PROGRESS";
   const combatants = playerCount + rivalCount;
   const countLabel = hasStatic ? " combatants" : combatants > 2 ? " ships" : "";
   return (
-    '<div class="battle-callout' + (ranged ? " ranged" : "") + '" style="--rival-color:' + battle.rival.color + '">' +
+    '<div class="battle-callout' + (ranged ? " ranged" : intercept ? " intercept" : "") + '" style="--rival-color:' + battle.rival.color + '">' +
       '<span class="battle-callout-icon" aria-hidden="true">⚔</span>' +
       '<span class="battle-callout-main">' +
         '<span class="kicker">' + kicker + '</span>' +
@@ -340,7 +362,8 @@ function openBattleSheet(row, col) {
   }
   showSheet({
     kind: "battle",
-    kicker: (battle.inHex ? "IN-HEX ENGAGEMENT" : "RANGED ENGAGEMENT") + " · " + sector.name.toUpperCase(),
+    kicker: (battle.intercept ? "PATROL INTERCEPT"
+      : battle.inHex ? "IN-HEX ENGAGEMENT" : "RANGED ENGAGEMENT") + " · " + sector.name.toUpperCase(),
     title: "Battle · Hex " + (battle.row + 1) + ":" + (battle.col + 1),
     body: battleSheetHTML(battle)
   });

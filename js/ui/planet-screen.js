@@ -172,12 +172,18 @@ function patrolStatusHTML(sector, row, col) {
       const label = isStructure ? "Stronghold" : source.ship.name;
       const radius = isStructure ? getStructurePatrolRadius(source.structure) : source.radius;
       const relation = radius > 0 ? "R" + radius + " ZONE" : "GARRISON";
+      const awayLabel = !isStructure && source.away
+        ? (source.status === "engaging" ? "ENGAGED"
+          : source.status === "intercepting" ? "INTERCEPTING"
+            : "RETURNING")
+        : "";
       parts.push(
         '<div class="patrol-row">' +
           '<span class="patrol-row-icon" aria-hidden="true">' + (isStructure ? "🏰" : "🛡") + '</span>' +
           '<span class="patrol-row-main">' +
             '<span class="patrol-row-name">' + label + '</span>' +
-            '<span class="patrol-row-meta">' + (isStructure ? "Static defender" : "Patrol corvette") + ' · ' + relation + '</span>' +
+            '<span class="patrol-row-meta">' + (isStructure ? "Static defender" : "Patrol corvette") + ' · ' + relation +
+              (awayLabel ? ' · <b class="patrol-away">' + awayLabel + '</b>' : '') + '</span>' +
           '</span>' +
           '<span class="patrol-row-radius">' + (radius > 0 ? radius + " HEX" : "GARRISON") + '</span>' +
         '</div>'
@@ -185,7 +191,7 @@ function patrolStatusHTML(sector, row, col) {
     });
     parts.push('</div>');
   } else {
-    parts.push('<div class="slot-lock-note"><span>🛡</span><span>No friendly patrol covers this hex. A corvette in the hex still fights in place; SET PATROL extends its reach to 1 hex. A stronghold covers 2.</span></div>');
+    parts.push('<div class="slot-lock-note"><span>🛡</span><span>No friendly patrol covers this hex. A corvette in the hex still fights in place; SET PATROL gives it a 1-hex response zone and it flies at a hostile inside that zone. A stronghold fires across 2.</span></div>');
   }
 
   if (hostileSources.length) {
@@ -198,9 +204,9 @@ function patrolStatusHTML(sector, row, col) {
     parts.push('</div>');
     parts.push('<p class="fleet-note">' + (exposed
       ? "This hex is exposed. Hostile ships will fire when the turn resolves. Set a corvette to patrol or anchor a stronghold nearby."
-      : "Both sides fire in the same resolution. Patrol ships fire on one hostile in their radius each turn, so a wider zone is safer.") + '</p>');
+      : "Both sides fire in the same resolution. A patrolling corvette flies onto a hostile inside its zone and fights it in that hex; the station keeps the same coverage.") + '</p>');
   } else if (coverage.length) {
-    parts.push('<p class="fleet-note">No hostile contact. The zone will fire on a hostile that enters it before the next resolution.</p>');
+    parts.push('<p class="fleet-note">No hostile contact. A hostile that enters the zone is intercepted before the next resolution.</p>');
   }
 
   parts.push("</div>");
@@ -1434,7 +1440,7 @@ function fleetTabHTML(row, col) {
       battleSection +
       patrolSection +
       '<div class="fleet-empty">No ships are stationed in this hex.</div>' +
-      '<p class="fleet-note">Open the Fleet tab of another hex, select ships, then preview a route on the sector map. Each ship advances up to its speed per turn. Any ship charts the hex it enters. Set a corvette to patrol to defend a hex without moving it.</p>'
+      '<p class="fleet-note">Open the Fleet tab of another hex, select ships, then preview a route on the sector map. Each ship advances up to its speed per turn. Any ship charts the hex it enters. Set a corvette to patrol a hex: when a hostile enters its zone it flies out, fights in the hostile hex and returns to the station.</p>'
     );
   }
 
@@ -1532,9 +1538,20 @@ function fleetTabHTML(row, col) {
         (remainingStops ? " · " + remainingStops + (remainingStops === 1 ? " STOP" : " STOPS") : "") +
         " · ETA " + getPathEta(ship.path.length, ship.type) + "T</span>";
     }
-    const patrolChip = ship.patrol
-      ? '<span class="ship-order-chip patrol-chip">🛡 PATROL R' + radius + '</span>'
-      : "";
+    let patrolChip = "";
+    if (ship.patrol) {
+      const station = sector ? getShipPatrolStation(ship, sector.id) : null;
+      const away = !!station && (station.row !== row || station.col !== col);
+      if (!away) {
+        patrolChip = '<span class="ship-order-chip patrol-chip">🛡 PATROL R' + radius + '</span>';
+      } else {
+        const status = getShipPatrolStatus(ship, sector.id, row, col);
+        const label = status === "engaging" ? "ENGAGED"
+          : status === "intercepting" ? "INTERCEPT" : "RETURN";
+        patrolChip = '<span class="ship-order-chip patrol-chip patrol-away-chip">🛡 ' + label +
+          ' · HOME ' + (station.row + 1) + ":" + (station.col + 1) + '</span>';
+      }
+    }
     return (
       '<button class="ship-row' + (selected ? " selected" : "") + (ship.patrol ? " patrolling" : "") + '" data-ship-id="' + ship.id + '" aria-pressed="' + (selected ? "true" : "false") + '">' +
         '<span class="ship-row-icon ship-icon-' + ship.type + '" aria-hidden="true">' + type.emoji + "</span>" +
@@ -1616,7 +1633,7 @@ function fleetTabHTML(row, col) {
           '<div class="fleet-section-head"><h3>GATE JUMP</h3><span class="fleet-selected-count">LOCKED</span></div>' +
           '<div class="slot-lock-note"><span>🌀</span><span>' + gateLockMessage(structure) + '</span></div>' +
         '</div>') +
-    '<p class="fleet-note">Tap ships to build a movement group. In the sector map, tap a hex to order it as the final destination, or long-press a hex to send one of its ships without opening its dossier. While a route is pending, hold hexes to add ordered stops and tap the final hex to close the journey. Each ship travels up to its speed in hexes per turn. A patrolling corvette holds its hex, fires on a hostile within 1 hex each turn and protects that zone from raids; moving or jumping cancels patrol. Gate jumps cost ' + jumpCost + ' ⚡, are only available at an operational gate, and land on the destination lane\'s labelled hex.</p>'
+    '<p class="fleet-note">Tap ships to build a movement group. In the sector map, tap a hex to order it as the final destination, or long-press a hex to send one of its ships without opening its dossier. While a route is pending, hold hexes to add ordered stops and tap the final hex to close the journey. Each ship travels up to its speed in hexes per turn. A patrolling corvette holds its station, flies at a hostile inside its 1-hex zone and fights it in the hostile hex, then returns; the zone never moves and protects its hexes from raids. Moving or jumping cancels patrol. Gate jumps cost ' + jumpCost + ' ⚡, are only available at an operational gate, and land on the destination lane\'s labelled hex.</p>'
   );
 }
 function renderPlanet() {

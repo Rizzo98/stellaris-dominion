@@ -1,9 +1,10 @@
 /* ============================================================
    MILITARY ACTIONS — player patrol orders
-   Patrol is a per-corvette stance. A patrolling corvette stays in its hex,
-   attacks hostile ships within its radius when the turn resolves, and
-   protects the hexes in that radius from raids. Moving or jumping with a
-   patrolling ship cancels the stance in game/planet-nav.js.
+   Patrol is a per-corvette stance anchored on a station. The corvette keeps
+   its station and the coverage around it; when a hostile ship enters that
+   radius the hull flies onto it when the turn resolves, fights in the
+   hostile hex and returns once the fight is finished. Moving or jumping
+   cancels the stance (and the station) in game/planet-nav.js.
    ============================================================ */
 
 function setSelectedShipsPatrol(active) {
@@ -25,10 +26,17 @@ function setSelectedShipsPatrol(active) {
   }
 
   let changed = 0;
+  const stationKey = hexKey(pos.row, pos.col);
   military.forEach(function (ship) {
     if (active) {
-      if (!ship.patrol) changed += 1;
+      const wasPatrolling = !!ship.patrol;
+      if (!wasPatrolling) changed += 1;
       ship.patrol = true;
+      /* A fresh order anchors where the hull stands. A hull that is already
+         patrolling keeps its station, even if it is away fighting. */
+      if (!wasPatrolling || !ship.patrolHomeKey) {
+        setShipPatrolStation(ship, sector.id, stationKey);
+      }
       if (ship.path) {
         delete ship.path;
         delete ship.pathSectorId;
@@ -36,6 +44,7 @@ function setSelectedShipsPatrol(active) {
       }
     } else if (ship.patrol) {
       ship.patrol = false;
+      clearShipPatrolStation(ship);
       changed += 1;
     }
   });
@@ -53,7 +62,7 @@ function setSelectedShipsPatrol(active) {
       ? ((CONFIG.military && CONFIG.military.patrolRadius) || 1)
       : SHIP_TYPES[military[0].type].patrolRadius;
     toast("Patrol ordered · " + military.length + " corvette" + (military.length === 1 ? "" : "s") +
-      " · radius " + radius + (radius === 1 ? " hex" : " hexes") + " · routes cancelled.");
+      " · radius " + radius + (radius === 1 ? " hex" : " hexes") + " · intercepts hostiles in the zone.");
   } else {
     toast("Patrol stood down · " + military.length + " corvette" + (military.length === 1 ? "" : "s") + ".");
   }
