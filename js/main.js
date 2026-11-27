@@ -150,16 +150,16 @@ function bindEvents() {
     handleHexTap(pos.row, pos.col);
   });
   /* Long press a hex to send one of its ships: a single ship starts the route
-     order at once, several open the picker, and the map then takes the
-     destination. Returning false leaves the release click to the tap handler,
-     so a pending move still picks its destination from a long press. */
+     order at once, several open the picker, and the map then takes the final
+     destination from a tap. While a route is being planned the same hold adds
+     that hex as an ordered stop and swallows its release click. */
   bindLongPress(els.sectorMap, "[data-hex]", function (group) {
     const pos = parseHexKey(group.getAttribute("data-hex"));
     return handleHexLongPress(pos.row, pos.col);
   });
 
   els.moveCancel.addEventListener("click", function () { cancelFleetMove(true); });
-  els.moveConfirm.addEventListener("click", confirmFleetMove);
+  els.moveUndo.addEventListener("click", undoFleetMoveStop);
 
   // Tech cards and the category switch above them.
   els.techList.addEventListener("click", function (event) {

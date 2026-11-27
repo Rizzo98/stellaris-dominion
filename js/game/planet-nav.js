@@ -157,6 +157,7 @@ function beginFleetMove() {
     sectorId: state.ui.activeSector,
     from: state.ui.selectedHex,
     ids: ids.slice(),
+    stops: [],
     previewPath: null,
     previewDestination: null
   };
@@ -190,21 +191,36 @@ function getMoveShips(move) {
   });
 }
 
-/* Confirming a route gives every selected ship the same path. They advance
-   along it at their own speed when the turn ends; nothing moves instantly. */
-function confirmFleetMove() {
+/* Refresh the gold preview line. While the journey is still being defined it
+   stops at the last stop; the final leg is routed by the tap that ends the
+   order, so a long press never doubles as the destination. */
+function refreshMovePreview(move) {
+  if (!move) return null;
+  const stops = Array.isArray(move.stops) ? move.stops : [];
+  const path = stops.length ? buildJourneyPath(move.from, stops) : null;
+  move.previewPath = path && path.length ? path : null;
+  move.previewDestination = path && path.length ? path[path.length - 1] : null;
+  return move.previewPath;
+}
+
+function undoFleetMoveStop() {
   const move = state.ui.move;
-  if (!move || state.phase !== "actions") return;
-  if (move.sectorId !== state.ui.activeSector) {
-    state.ui.move = null;
-    renderAll();
-    return;
-  }
-  const path = move.previewPath || [];
-  if (!path.length) {
-    toast("Tap a destination hex first.");
-    return;
-  }
+  if (!move || !Array.isArray(move.stops) || !move.stops.length) return;
+  move.stops.pop();
+  refreshMovePreview(move);
+  renderAll();
+  toast(move.stops.length
+    ? "Stop removed · " + move.stops.length + (move.stops.length === 1 ? " stop" : " stops") +
+      " left. Tap a final hex when the journey is complete."
+    : "Stop removed. Tap a final hex to order a direct route.");
+}
+
+/* A finished order gives every selected ship the same path. The path already
+   runs through the stops in order; pathStops keeps their numbered markers and
+   the roster's order chip readable while the ships travel. Nothing moves
+   instantly: each hull advances along the route at its own speed when the turn
+   ends. */
+function orderFleetMove(move, path) {
   const moving = getMoveShips(move);
   if (!moving.length) {
     state.ui.move = null;
@@ -212,10 +228,15 @@ function confirmFleetMove() {
     toast("No ships were available to move.");
     return;
   }
-
+  const stops = Array.isArray(move.stops) ? move.stops.slice() : [];
   moving.forEach(function (ship) {
     ship.path = path.slice();
     ship.pathSectorId = move.sectorId;
+    if (stops.length) {
+      ship.pathStops = stops.slice();
+    } else {
+      delete ship.pathStops;
+    }
     /* A ship leaving its station abandons patrol coverage. */
     ship.patrol = false;
   });
@@ -229,7 +250,46 @@ function confirmFleetMove() {
   state.ui.activeTab = "map";
   renderAll();
   toast("Route ordered for " + count + (count === 1 ? " ship" : " ships") +
-    " · " + path.length + " hexes · slowest ETA " + slowest + (slowest === 1 ? " turn." : " turns."));
+    " · " + path.length + " hexes" +
+    (stops.length ? " · " + stops.length + (stops.length === 1 ? " stop" : " stops") : "") +
+    " · slowest ETA " + slowest + (slowest === 1 ? " turn." : " turns."));
+}
+
+/* A tap names the final hex and closes the journey. A tap on the last stop
+   promotes that stop to the final destination, so a stop added by mistake can
+   be confirmed without routing an extra leg back to it. */
+function completeFleetMove(targetKey) {
+  const move = state.ui.move;
+  if (!move || state.phase !== "actions") return;
+  if (move.sectorId !== state.ui.activeSector) {
+    state.ui.move = null;
+    renderAll();
+    return;
+  }
+  const origin = parseHexKey(move.from);
+  const target = parseHexKey(targetKey);
+  if (!isInsideSector(target.row, target.col)) return;
+  if (origin.row === target.row && origin.col === target.col) {
+    toast("Choose a final hex other than the origin.");
+    return;
+  }
+  const stops = Array.isArray(move.stops) ? move.stops.slice() : [];
+  const stopIndex = stops.indexOf(targetKey);
+  if (stopIndex !== -1) {
+    if (stopIndex !== stops.length - 1) {
+      toast("That hex is already stop " + (stopIndex + 1) +
+        ". Tap a final hex after the last stop.");
+      return;
+    }
+    stops.pop();
+  }
+  const path = buildJourneyPath(move.from, stops.concat([targetKey]));
+  if (!path || !path.length) {
+    toast("No route to that hex.");
+    return;
+  }
+  move.stops = stops;
+  orderFleetMove(move, path);
 }
 
 function jumpFleetToSector(targetId) {
@@ -284,6 +344,7 @@ function jumpFleetToSector(targetId) {
   moving.forEach(function (ship) {
     delete ship.path;
     delete ship.pathSectorId;
+    delete ship.pathStops;
     ship.patrol = false;
   });
 
@@ -310,24 +371,7 @@ function handleHexTap(row, col) {
   if (state.phase !== "actions") return;
   if (!isInsideSector(row, col)) return;
   if (state.ui.move) {
-    if (state.ui.move.sectorId !== state.ui.activeSector) {
-      state.ui.move = null;
-      renderAll();
-      return;
-    }
-    const origin = parseHexKey(state.ui.move.from);
-    if (origin.row === row && origin.col === col) {
-      toast("Choose a destination other than the origin hex.");
-      return;
-    }
-    const path = findHexPath(origin.row, origin.col, row, col);
-    if (!path || !path.length) {
-      toast("No route to that hex.");
-      return;
-    }
-    state.ui.move.previewPath = path;
-    state.ui.move.previewDestination = hexKey(row, col);
-    renderAll();
+    completeFleetMove(hexKey(row, col));
     return;
   }
   openHex(row, col, "world");

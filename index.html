@@ -196,11 +196,11 @@
         <div class="move-banner hidden" id="move-banner" aria-live="polite">
           <div class="move-banner-main">
             <span class="kicker">FLEET MOVEMENT</span>
-            <strong id="move-banner-text">Tap any destination hex.</strong>
+            <strong id="move-banner-text">Tap a final hex to order the journey.</strong>
             <span class="move-banner-sub" id="move-banner-sub"></span>
           </div>
           <div class="move-banner-actions">
-            <button class="move-confirm hidden" id="move-confirm">CONFIRM</button>
+            <button class="move-undo hidden" id="move-undo">UNDO STOP</button>
             <button class="move-cancel" id="move-cancel">CANCEL</button>
           </div>
         </div>
@@ -222,8 +222,9 @@
           <span class="legend-item"><span class="legend-dot fog"></span>FOG</span>
           <span class="legend-item"><span class="legend-dot attention"></span>ATTENTION</span>
           <span class="legend-item"><span class="legend-line route"></span>ROUTE</span>
+          <span class="legend-item"><span class="legend-dot stop"></span>STOP</span>
         </div>
-        <p class="map-hint">Hold a hex with ships to move one without opening its dossier.</p>
+        <p class="map-hint">Hold a hex with ships to move one without opening its dossier. While routing, hold a hex to add a stop; tap a hex to order the final destination.</p>
         <div class="sector-stats" aria-label="Sector summary">
           <div class="sector-stat"><span>CHARTED</span><b><span id="sector-stat-charted">1</span><small>/ 24</small></b></div>
           <div class="sector-stat"><span>COLONIES</span><b id="sector-stat-colonies">1</b></div>

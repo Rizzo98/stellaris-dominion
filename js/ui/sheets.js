@@ -85,7 +85,8 @@ function openBuildSheet(systemId, slotIndex) {
 
 /* Long press on a sector hex with several ships: pick which one moves. The
    sheet is a launcher, not a selection screen — a row starts the normal route
-   order and closes the sheet, and the map then takes the destination. */
+   order and closes the sheet, and the map then takes the final destination or
+   the ordered stops. */
 function openQuickMoveSheet(ships, hexKeyValue, sectorId) {
   if (state.phase !== "actions") return;
   if (!ships || !ships.length || !hexKeyValue) return;

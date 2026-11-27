@@ -37,9 +37,15 @@ function collectFleetRoutes(sector) {
   Object.keys(sector.fleets || {}).forEach(function (startKey) {
     (sector.fleets[startKey] || []).forEach(function (ship) {
       if (!ship.path || ship.pathSectorId !== sector.id || !ship.path.length) return;
-      const signature = startKey + ">" + ship.path.join(">");
+      const stops = Array.isArray(ship.pathStops) ? ship.pathStops.slice() : [];
+      const signature = startKey + ">" + ship.path.join(">") + "|" + stops.join(">");
       if (!groups[signature]) {
-        groups[signature] = { startKey: startKey, path: ship.path.slice(), ships: [] };
+        groups[signature] = {
+          startKey: startKey,
+          path: ship.path.slice(),
+          stops: stops,
+          ships: []
+        };
       }
       groups[signature].ships.push(ship);
     });
@@ -57,6 +63,20 @@ function routePoints(startKey, path) {
     points.push(center.x.toFixed(1) + "," + center.y.toFixed(1));
   });
   return points.join(" ");
+}
+
+/* A numbered stop chip. Planned stops sit on the gold preview; committed
+   stops keep their number on the blue dashed route until the ship passes
+   them. The top-centre placement leaves the system emoji and fleet badges
+   readable. */
+function waypointMarker(x, y, number, committed) {
+  const cls = "waypoint-marker " + (committed ? "committed" : "planned");
+  return (
+    '<g class="' + cls + '" aria-hidden="true">' +
+      '<circle cx="' + x.toFixed(1) + '" cy="' + (y - 20.5).toFixed(1) + '" r="5.8"></circle>' +
+      '<text x="' + x.toFixed(1) + '" y="' + (y - 20.2).toFixed(1) + '">' + number + "</text>" +
+    "</g>"
+  );
 }
 
 function etaSummary(ships, pathLength) {
@@ -382,6 +402,7 @@ function renderMap() {
   const sectorHasGate = hasOperationalGateInSector(sector.id);
 
   const move = state.ui.move && state.ui.move.sectorId === sector.id ? state.ui.move : null;
+  const moveStops = move && Array.isArray(move.stops) ? move.stops : [];
   const previewPath = move && move.previewPath ? move.previewPath : [];
   const previewKeys = new Set(previewPath);
   const previewDestination = previewPath.length ? previewPath[previewPath.length - 1] : null;
@@ -436,7 +457,9 @@ function renderMap() {
       const landing = landingByKey[key] || null;
       const raidWarning = raidWarningByKey[key] || null;
       const isPreview = previewKeys.has(key);
-      const isDestination = previewDestination === key;
+      const stopIndex = moveStops.indexOf(key);
+      const isWaypoint = stopIndex !== -1;
+      const isDestination = previewDestination === key && !isWaypoint;
       const isOrigin = !!move && move.from === key;
       const classList = ["hex-group"];
       if (system) classList.push("system-group", system.colonized ? "colony" : "unclaimed");
@@ -456,6 +479,7 @@ function renderMap() {
       if (raidWarning) classList.push("has-raid-warning");
       if (isPreview) classList.push("path-preview");
       if (isDestination) classList.push("move-destination");
+      if (isWaypoint) classList.push("move-waypoint");
       if (isOrigin) classList.push("move-origin");
       const rivalColor = rivalSystemEmpire ? rivalSystemEmpire.color
         : (rivalFleetEmpire ? rivalFleetEmpire.color
@@ -516,6 +540,7 @@ function renderMap() {
           ", approached from the " + landingCompass(landing.slot);
       }
       if (isPreview) label += ", on previewed route";
+      if (isWaypoint) label += ", stop " + (stopIndex + 1) + " of the planned journey";
       if (isDestination) label += ", route destination";
 
       const rivalStyle = rivalColor ? ' style="--rival-color:' + rivalColor + '"' : "";
@@ -618,6 +643,9 @@ function renderMap() {
       if (raidWarning) {
         pieces.push(raidWarningMarker(center.x, center.y, raidWarning));
       }
+      if (isWaypoint) {
+        pieces.push(waypointMarker(center.x, center.y, stopIndex + 1, false));
+      }
 
       pieces.push("</g>");
     }
@@ -646,6 +674,12 @@ function renderMap() {
       return Math.max(max, getPathEta(route.path.length, ship.type));
     }, 0);
     routePieces.push('<polyline class="route-line" points="' + routePoints(route.startKey, route.path) + '"></polyline>');
+    route.stops.forEach(function (stopKey, index) {
+      if (route.path.indexOf(stopKey) === -1) return;
+      const stopPos = parseHexKey(stopKey);
+      const stopCenter = hexCenter(stopPos.row, stopPos.col);
+      routePieces.push(waypointMarker(stopCenter.x, stopCenter.y, index + 1, true));
+    });
     routePieces.push('<circle class="route-end" cx="' + dest.x.toFixed(1) + '" cy="' + dest.y.toFixed(1) + '" r="4.2"></circle>');
     routePieces.push('<text class="route-eta" x="' + (dest.x + 6).toFixed(1) + '" y="' + (dest.y + 12).toFixed(1) + '">' + slowest + "T</text>");
   });
@@ -738,23 +772,26 @@ function renderMap() {
     const ships = getFleetAt(origin.row, origin.col, sector.id).filter(function (ship) {
       return move.ids.indexOf(ship.id) !== -1;
     });
+    const stops = Array.isArray(move.stops) ? move.stops : [];
     els.moveBanner.classList.remove("hidden");
-    if (previewPath.length) {
+    if (stops.length && previewPath.length) {
       const slowest = ships.reduce(function (max, ship) {
         return Math.max(max, getPathEta(previewPath.length, ship.type));
       }, 0);
-      els.moveBannerText.textContent = "Route ready: " + previewPath.length +
-        (previewPath.length === 1 ? " hex" : " hexes") + " · slowest ETA " + slowest + (slowest === 1 ? " turn" : " turns");
-      els.moveBannerSub.textContent = etaSummary(ships, previewPath.length) + " · confirm to assign";
-      els.moveConfirm.classList.remove("hidden");
+      els.moveBannerText.textContent = "Journey · " + stops.length +
+        (stops.length === 1 ? " stop" : " stops") + " · " + previewPath.length +
+        (previewPath.length === 1 ? " hex" : " hexes") + " · slowest " + slowest + "T";
+      els.moveBannerSub.textContent = etaSummary(ships, previewPath.length) +
+        " to the last stop · tap a final hex to order · hold another hex to add a stop";
+      if (els.moveUndo) els.moveUndo.classList.remove("hidden");
     } else {
       els.moveBannerText.textContent = move.ids.length + (move.ids.length === 1 ? " ship" : " ships") +
-        " ready. Tap any destination hex.";
-      els.moveBannerSub.textContent = "Each ship travels up to its speed per turn.";
-      els.moveConfirm.classList.add("hidden");
+        " ready. Tap a final hex to order the journey.";
+      els.moveBannerSub.textContent = "Hold a hex to add a stop, or tap one to order the final destination. Each ship travels up to its speed per turn.";
+      if (els.moveUndo) els.moveUndo.classList.add("hidden");
     }
   } else {
     els.moveBanner.classList.add("hidden");
-    els.moveConfirm.classList.add("hidden");
+    if (els.moveUndo) els.moveUndo.classList.add("hidden");
   }
 }

@@ -341,8 +341,8 @@ function testPlayerPatrolOrder() {
   run("setSelectedShipsPatrol(true)");
   eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrol"), true,
     "SET PATROL puts the selected corvette on station");
-  run("state.ui.move = {sectorId:'sec-core', from:hexKey(2,3), ids:['" + shipId + "'], previewPath:['1,3'], previewDestination:'1,3'};");
-  run("confirmFleetMove()");
+  run("state.ui.move = {sectorId:'sec-core', from:hexKey(2,3), ids:['" + shipId + "'], stops:[], previewPath:['1,3'], previewDestination:'1,3'};");
+  run("completeFleetMove('1,3')");
   eq(run("getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').patrol"), false,
     "assigning a route stands the corvette down");
   ok(run("!!getFleetAt(2,3,'sec-core').find(s=>s.id==='" + shipId + "').path"),

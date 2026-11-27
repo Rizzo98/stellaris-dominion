@@ -83,7 +83,7 @@ const els = {
   moveBanner: byId("move-banner"),
   moveBannerText: byId("move-banner-text"),
   moveBannerSub: byId("move-banner-sub"),
-  moveConfirm: byId("move-confirm"),
+  moveUndo: byId("move-undo"),
   moveCancel: byId("move-cancel"),
   researchBanner: byId("research-banner"),
   techList: byId("tech-list"),

@@ -133,6 +133,7 @@ function advanceShipOrders() {
         if (!ship.path.length) {
           delete ship.path;
           delete ship.pathSectorId;
+          delete ship.pathStops;
         }
         arrivals.push({ sectorId: sector.id, key: hexKey(row, col), ship: ship });
       });

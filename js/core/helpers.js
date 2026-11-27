@@ -235,6 +235,16 @@ function getPathEta(pathLength, shipOrType) {
   return Math.ceil(pathLength / getShipSpeed(shipOrType));
 }
 
+/* A multi-stop route stores its waypoints in journey order. A stop the ship
+   has already entered drops out of the remaining list, while the rest keep
+   their original numbering on the map and in the roster's order chip. */
+function getRemainingPathStops(ship) {
+  if (!ship || !Array.isArray(ship.pathStops) || !ship.path || !ship.path.length) return [];
+  return ship.pathStops.filter(function (key) {
+    return ship.path.indexOf(key) !== -1;
+  });
+}
+
 function getSectorChartedCount(sectorId) {
   return getExploredHexes(sectorId).size;
 }

@@ -32,6 +32,7 @@ function setSelectedShipsPatrol(active) {
       if (ship.path) {
         delete ship.path;
         delete ship.pathSectorId;
+        delete ship.pathStops;
       }
     } else if (ship.patrol) {
       ship.patrol = false;

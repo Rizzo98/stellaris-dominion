@@ -183,6 +183,29 @@ function findHexPath(fromRow, fromCol, toRow, toCol) {
   return null;
 }
 
+/* A journey is an ordered list of hexes: the stops the player set and, last,
+   the final destination. Each leg is routed independently, so the full path
+   reaches every stop in the order it was added. Returns null when a leg
+   cannot be routed. */
+function buildJourneyPath(fromKey, targetKeys) {
+  const origin = parseHexKey(fromKey);
+  if (!isInsideSector(origin.row, origin.col)) return null;
+  const targets = Array.isArray(targetKeys) ? targetKeys : [];
+  if (!targets.length) return null;
+  const path = [];
+  let cursor = origin;
+  for (let i = 0; i < targets.length; i += 1) {
+    const target = parseHexKey(targets[i]);
+    if (!isInsideSector(target.row, target.col)) return null;
+    if (target.row === cursor.row && target.col === cursor.col) continue;
+    const leg = findHexPath(cursor.row, cursor.col, target.row, target.col);
+    if (!leg) return null;
+    leg.forEach(function (key) { path.push(key); });
+    cursor = target;
+  }
+  return path;
+}
+
 function markHexExplored(row, col, sectorId) {
   const sector = getSector(sectorId || state.ui.activeSector);
   if (!sector || !isInsideSector(row, col)) return;

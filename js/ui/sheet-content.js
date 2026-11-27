@@ -7,7 +7,7 @@
 
 /* Quick-move picker: the ships stationed in the hex the player held. Each row
    is a one-tap action, so there is no selection state in here — the row hands
-   its ship to the map, which then takes the destination. */
+   its ship to the map, which then takes the final destination and any stops. */
 function quickMoveSheetHTML(ships) {
   const fleet = ships || [];
   const rows = fleet.map(function (ship) {
@@ -18,9 +18,11 @@ function quickMoveSheetHTML(ships) {
     const damaged = hull < hullMax;
     const hasOrder = !!(ship.path && ship.path.length && ship.pathSectorId === state.ui.activeSector);
     const destination = hasOrder ? parseHexKey(ship.path[ship.path.length - 1]) : null;
+    const remainingStops = getRemainingPathStops(ship).length;
     const orderChip = hasOrder
       ? '<span class="ship-order-chip">→ ' + (destination.row + 1) + ":" + (destination.col + 1) +
         " · " + ship.path.length + (ship.path.length === 1 ? " HEX" : " HEXES") +
+        (remainingStops ? " · " + remainingStops + (remainingStops === 1 ? " STOP" : " STOPS") : "") +
         " · ETA " + getPathEta(ship.path.length, ship.type) + "T</span>"
       : "";
     const patrolChip = ship.patrol
@@ -28,7 +30,7 @@ function quickMoveSheetHTML(ships) {
       : "";
     return (
       '<button class="ship-row quick-move-row" type="button" data-quick-move-ship="' + ship.id + '"' +
-        ' aria-label="Move ' + ship.name + ' to a destination hex">' +
+        ' aria-label="Move ' + ship.name + ' to a final destination hex">' +
         '<span class="ship-row-icon ship-icon-' + ship.type + '" aria-hidden="true">' + type.emoji + "</span>" +
         '<span class="ship-row-main">' +
           '<span class="ship-row-name">' + ship.name + "</span>" +
@@ -48,9 +50,9 @@ function quickMoveSheetHTML(ships) {
   return (
     '<p class="sheet-scope"><b>' + fleet.length + "</b> " +
       (fleet.length === 1 ? "ship" : "ships") +
-      " stationed here. Tap one to pick its destination on the map.</p>" +
+      " stationed here. Tap one to pick its final destination and stops on the map.</p>" +
     '<div class="ship-list quick-move-list">' + rows + "</div>" +
-    '<p class="sheet-note">The route is previewed on the map before it is ordered. A ship that is already moving keeps its hex until the turn ends; confirming a new route replaces the old one, and any patrol stance on the moving ship stands down.</p>'
+    '<p class="sheet-note">Hold hexes on the map to add ordered stops, then tap a final hex to order the journey. A ship that is already moving keeps its hex until the turn ends; a new route replaces the old one, and any patrol stance on the moving ship stands down.</p>'
   );
 }
 
